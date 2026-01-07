@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
@@ -17,7 +17,13 @@ import {
   Lock,
   CheckCircle,
   AlertCircle,
+  Upload,
+  X,
+  FileIcon,
+  Download,
+  FolderX,
 } from 'lucide-react';
+import { uploadToCloudinary, formatFileSize } from '@/utils/cloudinary';
 
 interface Job {
   id: string;
@@ -33,6 +39,17 @@ interface Job {
   max_submissions: number | null;
   current_submissions: number;
   category: { name: string } | null;
+  job_file_url: string | null;
+  job_file_name: string | null;
+  job_file_type: string | null;
+}
+
+interface UploadedFile {
+  id: string;
+  name: string;
+  size: number;
+  type: string;
+  file: File;
 }
 
 const JobDetail = () => {
@@ -46,7 +63,13 @@ const JobDetail = () => {
   const [hasSubmitted, setHasSubmitted] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submissionContent, setSubmissionContent] = useState('');
-  const [submissionUrl, setSubmissionUrl] = useState('');
+  
+  // File upload state
+  const [uploadedFile, setUploadedFile] = useState<UploadedFile | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  
+  // File input ref
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -58,33 +81,49 @@ const JobDetail = () => {
     const fetchJob = async () => {
       if (!id) return;
 
-      const { data: jobData } = await supabase
-        .from('jobs')
-        .select('*, category:job_categories(name)')
-        .eq('id', id)
-        .single();
+      try {
+        const { data: jobData, error } = await supabase
+          .from('jobs')
+          .select('*, category:job_categories(name)')
+          .eq('id', id)
+          .single();
 
-      if (jobData) {
-        setJob(jobData as unknown as Job);
+        if (error) {
+          console.error('Error fetching job:', error);
+          toast({
+            title: 'Error',
+            description: 'Failed to load job details',
+            variant: 'destructive',
+          });
+        } else if (jobData) {
+          setJob(jobData as unknown as Job);
+        }
+
+        // Check if user has already submitted
+        if (user) {
+          const { data: submissionData } = await supabase
+            .from('job_submissions')
+            .select('id')
+            .eq('job_id', id)
+            .eq('user_id', user.id)
+            .maybeSingle();
+
+          setHasSubmitted(!!submissionData);
+        }
+      } catch (error) {
+        console.error('Exception fetching job:', error);
+        toast({
+          title: 'Error',
+          description: 'Failed to load job details',
+          variant: 'destructive',
+        });
+      } finally {
+        setIsLoading(false);
       }
-
-      // Check if user has already submitted
-      if (user) {
-        const { data: submissionData } = await supabase
-          .from('job_submissions')
-          .select('id')
-          .eq('job_id', id)
-          .eq('user_id', user.id)
-          .maybeSingle();
-
-        setHasSubmitted(!!submissionData);
-      }
-
-      setIsLoading(false);
     };
 
     fetchJob();
-  }, [id, user]);
+  }, [id, user, toast]);
 
   const canAccessJob = () => {
     if (!job || !profile) return false;
@@ -107,41 +146,208 @@ const JobDetail = () => {
     return canAccessJob();
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // Trigger file input click
+  const handleFileUploadClick = () => {
+    if (fileInputRef.current) {
+      fileInputRef.current.click();
+    }
+  };
+
+  // Handle file selection
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    const file = files[0];
+    
+    // Validate file size (max 100MB)
+    if (file.size > 100 * 1024 * 1024) {
+      toast({
+        title: 'File too large',
+        description: 'Maximum file size is 100MB',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const uploadedFile: UploadedFile = {
+      id: Math.random().toString(36).substring(2) + Date.now().toString(36),
+      name: file.name,
+      size: file.size,
+      type: file.type,
+      file: file,
+    };
+
+    setUploadedFile(uploadedFile);
+    
+    // Reset file input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const removeFile = () => {
+    setUploadedFile(null);
+  };
+
+  // Handle job file download - AUTOMATIC download from Cloudinary
+  const handleDownloadJobFile = async () => {
+    if (!job?.job_file_url) {
+      toast({
+        title: 'File not available',
+        description: 'Job file is not available for download',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    try {
+      // Fetch the file from Cloudinary URL
+      const response = await fetch(job.job_file_url);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch file: ${response.status}`);
+      }
+      
+      const blob = await response.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      
+      // Create a temporary link for download
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = job.job_file_name || 'job_file';
+      
+      // Append to body, click, and remove
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      // Clean up the URL object
+      window.URL.revokeObjectURL(downloadUrl);
+      
+      // No toast notification - silent download as requested
+      
+    } catch (error) {
+      console.error('Download error:', error);
+      toast({
+        title: 'Download failed',
+        description: 'Failed to download the job file',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  // Handle file upload (no Cloudinary notifications)
+  const handleUploadToCloudinary = async (): Promise<string> => {
+    if (!uploadedFile) {
+      throw new Error('No file selected');
+    }
+
+    setIsUploading(true);
+
+    try {
+      // Upload to Cloudinary silently
+      const cloudinaryUrl = await uploadToCloudinary(uploadedFile.file);
+      return cloudinaryUrl;
+
+    } catch (error: any) {
+      console.error('Upload error:', error);
+      throw new Error('Failed to upload file');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  // Handle work submission
+  const handleSubmitWork = async (cloudinaryUrl?: string) => {
     if (!user || !job || !canSubmit()) return;
+
+    // Validate required fields
+    if (!uploadedFile && !submissionContent.trim() && !cloudinaryUrl) {
+      toast({
+        title: 'Submission Required',
+        description: 'Please either upload a file or enter submission content.',
+        variant: 'destructive',
+      });
+      return;
+    }
 
     setIsSubmitting(true);
 
-    const { error } = await supabase.from('job_submissions').insert({
-      job_id: job.id,
-      user_id: user.id,
-      submission_content: submissionContent,
-      submission_url: submissionUrl || null,
-      payment_amount: job.payment_amount,
-    });
+    try {
+      const submissionData: any = {
+        job_id: job.id,
+        user_id: user.id,
+        submission_content: submissionContent || `File uploaded: ${uploadedFile?.name || 'Completed work'}`,
+        payment_amount: job.payment_amount,
+      };
 
-    if (error) {
-      toast({
-        title: 'Submission Failed',
-        description: error.message,
-        variant: 'destructive',
-      });
-    } else {
+      // Store worker's file URL if available
+      if (cloudinaryUrl) {
+        // Store in BOTH columns to ensure compatibility
+        submissionData.file_url = cloudinaryUrl;
+        submissionData.file_name = uploadedFile?.name || 'submitted_work';
+        submissionData.file_type = uploadedFile?.type || 'application/octet-stream';
+        submissionData.file_size = uploadedFile?.size || 0;
+        
+        // ALSO store in worker_file_url for admin interface
+        submissionData.worker_file_url = cloudinaryUrl;
+        submissionData.worker_file_name = uploadedFile?.name || 'submitted_work';
+      }
+
+      const { error } = await supabase.from('job_submissions').insert(submissionData);
+
+      if (error) {
+        throw error;
+      }
+
       // Update daily tasks used
       await supabase
         .from('profiles')
         .update({ daily_tasks_used: (profile?.daily_tasks_used || 0) + 1 })
         .eq('id', user.id);
 
+      // Update job submission count
+      await supabase
+        .from('jobs')
+        .update({ current_submissions: (job.current_submissions || 0) + 1 })
+        .eq('id', job.id);
+
       toast({
-        title: 'Submission Successful',
+        title: 'Submission Successful!',
         description: 'Your work has been submitted for review.',
       });
+      
       setHasSubmitted(true);
-    }
+      setUploadedFile(null);
+      setSubmissionContent('');
 
-    setIsSubmitting(false);
+    } catch (error: any) {
+      console.error('Submission error:', error);
+      toast({
+        title: 'Submission Failed',
+        description: error.message || 'Failed to submit work',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    // If file is selected, upload it first
+    if (uploadedFile) {
+      try {
+        const cloudinaryUrl = await handleUploadToCloudinary();
+        await handleSubmitWork(cloudinaryUrl);
+      } catch (error) {
+        console.error('Submission error:', error);
+      }
+    } else {
+      // If no file, submit text content only
+      await handleSubmitWork();
+    }
   };
 
   const getDifficultyColor = (difficulty: string) => {
@@ -173,7 +379,9 @@ const JobDetail = () => {
         <div className="text-center py-12">
           <AlertCircle className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
           <h2 className="text-xl font-semibold text-foreground mb-2">Job Not Found</h2>
-          <p className="text-muted-foreground mb-4">This job may have been removed or doesn't exist.</p>
+          <p className="text-muted-foreground mb-4">
+            This job may have been removed or doesn't exist.
+          </p>
           <Button variant="outline" asChild>
             <Link to="/jobs">
               <ArrowLeft className="w-4 h-4 mr-2" />
@@ -255,6 +463,64 @@ const JobDetail = () => {
             )}
           </div>
 
+          {/* JOB FILE DOWNLOAD SECTION - ALWAYS VISIBLE */}
+          <div className="mb-6 p-4 border border-primary/20 rounded-lg bg-primary/5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                  job.job_file_url ? 'bg-primary/10' : 'bg-muted'
+                }`}>
+                  {job.job_file_url ? (
+                    <Download className="w-5 h-5 text-primary" />
+                  ) : (
+                    <FolderX className="w-5 h-5 text-muted-foreground" />
+                  )}
+                </div>
+                <div>
+                  <h3 className="font-medium text-foreground">Job Materials</h3>
+                  <p className="text-sm text-muted-foreground">
+                    {job.job_file_url 
+                      ? 'Download the required file to complete this job' 
+                      : 'No uploaded files for this task'}
+                  </p>
+                </div>
+              </div>
+              
+              {job.job_file_url ? (
+                <Button
+                  variant="hero"
+                  size="sm"
+                  onClick={handleDownloadJobFile}
+                  className="flex items-center gap-2"
+                >
+                  <Download className="w-4 h-4" />
+                  Download File
+                </Button>
+              ) : (
+                <div className="text-sm text-muted-foreground italic">
+                  No file available
+                </div>
+              )}
+            </div>
+            
+            {job.job_file_url && job.job_file_name && (
+              <div className="mt-3 pl-13">
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <FileIcon className="w-3 h-3" />
+                  <span>File: {job.job_file_name}</span>
+                  {job.job_file_type && (
+                    <span className="text-xs px-2 py-0.5 bg-secondary rounded">
+                      {job.job_file_type}
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Click "Download File" to save the job materials to your device
+                </p>
+              </div>
+            )}
+          </div>
+
           <div className="space-y-4">
             <div>
               <h2 className="text-lg font-semibold text-foreground mb-2">Description</h2>
@@ -297,43 +563,129 @@ const JobDetail = () => {
         ) : (
           <div className="glass-card p-6 lg:p-8">
             <h2 className="text-xl font-semibold text-foreground mb-4">Submit Your Work</h2>
-            <form onSubmit={handleSubmit} className="space-y-4">
+            
+            <form onSubmit={handleSubmit} className="space-y-6">
+              {/* File Upload Section */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <Label className="text-lg font-medium">Upload Your Completed Work</Label>
+                  <span className="text-sm text-muted-foreground">Recommended</span>
+                </div>
+                
+                {/* Hidden file input */}
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleFileSelect}
+                  className="hidden"
+                  accept=".pdf,.doc,.docx,.txt,.jpg,.jpeg,.png,.gif,.zip,.rar,.mp4,.mp3,.xls,.xlsx,.ppt,.pptx"
+                  disabled={isUploading || isSubmitting}
+                />
+                
+                {!uploadedFile ? (
+                  <div className="border-2 border-dashed border-border rounded-lg p-8 text-center hover:border-primary/50 transition-colors">
+                    <Upload className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+                    <h3 className="text-lg font-medium text-foreground mb-2">
+                      Select your completed work file
+                    </h3>
+                    <p className="text-muted-foreground mb-4">
+                      Upload your completed work file
+                    </p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="lg"
+                      onClick={handleFileUploadClick}
+                      className="mx-auto"
+                      disabled={isUploading || isSubmitting}
+                    >
+                      <Upload className="w-4 h-4 mr-2" />
+                      Select File
+                    </Button>
+                    <p className="text-xs text-muted-foreground mt-4">
+                      Maximum file size: 100MB
+                    </p>
+                  </div>
+                ) : (
+                  <div className="border border-border rounded-lg p-4 bg-secondary/20">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-md bg-primary/10 flex items-center justify-center">
+                          <FileIcon className="w-5 h-5 text-primary" />
+                        </div>
+                        <div>
+                          <p className="font-medium text-foreground truncate max-w-[300px]">
+                            {uploadedFile.name}
+                          </p>
+                          <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                            <span>{formatFileSize(uploadedFile.size)}</span>
+                            <span>•</span>
+                            <span>{uploadedFile.type || 'Unknown type'}</span>
+                          </div>
+                        </div>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={removeFile}
+                        className="h-8 w-8 p-0"
+                        disabled={isUploading || isSubmitting}
+                      >
+                        <X className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+              
+              {/* OR Divider */}
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-border"></div>
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-background px-2 text-muted-foreground">Or</span>
+                </div>
+              </div>
+              
+              {/* Text Submission Alternative */}
               <div className="space-y-2">
-                <Label htmlFor="submissionContent">Submission Content *</Label>
+                <Label htmlFor="submissionContent">Submit as Text (Alternative)</Label>
                 <Textarea
                   id="submissionContent"
-                  placeholder="Enter your completed work here..."
+                  placeholder="If you prefer to submit as text, enter your completed work here..."
                   value={submissionContent}
                   onChange={(e) => setSubmissionContent(e.target.value)}
-                  rows={8}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="submissionUrl">Submission URL (optional)</Label>
-                <Input
-                  id="submissionUrl"
-                  type="url"
-                  placeholder="https://..."
-                  value={submissionUrl}
-                  onChange={(e) => setSubmissionUrl(e.target.value)}
+                  rows={6}
+                  disabled={isUploading || isSubmitting}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Add a link to your work if applicable (Google Drive, Dropbox, etc.)
+                  Use this if you cannot upload a file. File upload is preferred.
                 </p>
               </div>
+              
+              {/* Submit Button */}
               <Button
                 type="submit"
                 variant="hero"
-                className="w-full"
-                disabled={isSubmitting || !submissionContent.trim()}
+                className="w-full py-6 text-lg"
+                disabled={isSubmitting || isUploading || (!uploadedFile && !submissionContent.trim())}
               >
-                {isSubmitting ? (
-                  'Submitting...'
+                {isUploading ? (
+                  <>
+                    <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-white mr-2"></div>
+                    Uploading...
+                  </>
+                ) : isSubmitting ? (
+                  <>
+                    <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-white mr-2"></div>
+                    Submitting...
+                  </>
                 ) : (
                   <>
-                    <Send className="w-4 h-4 mr-2" />
-                    Submit Work
+                    <Send className="w-5 h-5 mr-2" />
+                    {uploadedFile ? 'Submit Work with File' : 'Submit Work'}
                   </>
                 )}
               </Button>

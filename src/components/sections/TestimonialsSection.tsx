@@ -8,7 +8,7 @@ const TestimonialsSection = () => {
       membership: "Pro Member",
       image: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&h=150&fit=crop&crop=face",
       content:
-        "SkillBridge completely transformed my freelance career. The curated jobs mean I spend less time searching and more time earning. Made $3,200 in my first month!",
+        "SkillBridge completely transformed my freelance career. The curated jobs mean I spend less time searching and more time earning. Made $2,200 in my first month! Bearing in mind it was a part-time job, before i declared it full-time",
       rating: 5,
       earnings: "$12,400",
     },

@@ -15,7 +15,6 @@ const PricingSection = () => {
         "Standard review time",
         "Email support",
         "Basic earnings dashboard",
-        "Weekly payouts",
       ],
       cta: "Start Regular",
       variant: "outline" as const,
@@ -33,7 +32,6 @@ const PricingSection = () => {
         "Priority review (24h)",
         "Priority email support",
         "Advanced analytics",
-        "Bi-weekly payouts",
         "Skill badges & reputation",
       ],
       cta: "Go Pro",
@@ -42,17 +40,16 @@ const PricingSection = () => {
     },
     {
       name: "VIP",
-      price: 49,
+      price: 45,
       period: "month",
       description: "For serious professionals",
       icon: Crown,
       features: [
         "Access to ALL job tiers",
-        "Unlimited tasks per day",
+        "10 tasks per day(Highest paing picks)",
         "Express review (12h)",
         "24/7 priority support",
         "Premium analytics & insights",
-        "Weekly instant payouts",
         "Featured profile badge",
         "Early access to new jobs",
       ],
@@ -147,7 +144,7 @@ const PricingSection = () => {
         {/* Trust Note */}
         <div className="text-center mt-12">
           <p className="text-muted-foreground text-sm">
-            All plans include a 7-day money-back guarantee. No questions asked.
+            All plans include instant guaranteed verification. No questions asked or delayed services.
           </p>
         </div>
       </div>

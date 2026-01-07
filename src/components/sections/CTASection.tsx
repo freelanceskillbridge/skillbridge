@@ -31,7 +31,7 @@ const CTASection = () => {
               </h2>
               
               <p className="text-lg text-muted-foreground max-w-2xl mx-auto mb-10">
-                Join 50,000+ professionals who've ditched the race to the bottom. 
+                Join Thousands professionals who've ditched the race to the bottom. 
                 Access curated jobs, guaranteed payments, and a supportive community.
               </p>
               

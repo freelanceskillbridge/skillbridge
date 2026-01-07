@@ -20,6 +20,7 @@ import {
   Lock,
   ArrowRight,
   Briefcase,
+  Upload,
 } from 'lucide-react';
 
 interface Category {
