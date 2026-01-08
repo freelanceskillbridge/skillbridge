@@ -6,7 +6,6 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/hooks/useAuth";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
-import AuthCallback from "@/pages/AuthCallback"; // ADD THIS IMPORT
 import Dashboard from "./pages/Dashboard";
 import Jobs from "./pages/Jobs";
 import JobDetail from "./pages/JobDetail";
@@ -17,6 +16,7 @@ import Pricing from "./pages/Pricing";
 import Checkout from "./pages/Checkout";
 import Admin from "./pages/Admin";
 import NotFound from "./pages/NotFound";
+import AuthCallback from '@/pages/AuthCallback';
 
 const queryClient = new QueryClient();
 
@@ -40,6 +40,7 @@ const App = () => (
             <Route path="/pricing" element={<Pricing />} />
             <Route path="/checkout" element={<Checkout />} />
             <Route path="/admin" element={<Admin />} />
+
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>
