@@ -2,12 +2,26 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    
+    <!-- FIXED VIEWPORT TAG - Add these properties -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, minimum-scale=1.0, viewport-fit=cover" />
+    
+    <!-- OR for stricter control: -->
+    <!-- <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" /> -->
 
     <title>SkillBridge - Premium Freelancing Platform</title>
 
     <!-- Favicon -->
     <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+
+    <!-- iOS specific tags -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="SkillBridge">
+    
+    <!-- Mobile web app tags -->
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#667eea">
 
     <meta
       name="description"
@@ -21,10 +35,38 @@
       content="Discover curated freelancing opportunities with membership benefits, secure payments, and professional growth."
     />
     <meta property="og:type" content="website" />
+    <meta property="og:image" content="/og-image.png" />
+    <meta property="og:url" content="https://skillbridge.com" />
+    <meta name="twitter:card" content="summary_large_image" />
+    
+    <!-- iOS Splash Screen (optional) -->
+    <link rel="apple-touch-startup-image" href="/splash.png">
+    
+    <!-- Preconnect to domains -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    
   </head>
 
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    
+    <!-- Optional: Add mobile detection script -->
+    <script>
+      // Prevent zoom on input focus in iOS
+      document.addEventListener('DOMContentLoaded', function() {
+        if (/iPhone|iPad|iPod/.test(navigator.userAgent)) {
+          document.addEventListener('focusin', function(e) {
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') {
+              document.body.style.zoom = "100%";
+            }
+          });
+          document.addEventListener('focusout', function() {
+            document.body.style.zoom = "";
+          });
+        }
+      });
+    </script>
   </body>
 </html>
