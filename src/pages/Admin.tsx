@@ -117,6 +117,42 @@ const Admin = () => {
     category_id: '',
   });
 
+  // Add this near other useEffects in admin.tsx
+useEffect(() => {
+  // Keep session alive with periodic refresh
+  const keepSessionAlive = async () => {
+    if (!user) return;
+    
+    try {
+      // Check if session is about to expire (within 5 minutes)
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (session) {
+        const expiresAt = session.expires_at ? session.expires_at * 1000 : 0;
+        const fiveMinutesFromNow = Date.now() + 5 * 60 * 1000;
+        
+        if (expiresAt < fiveMinutesFromNow) {
+          console.log('Refreshing admin session...');
+          const { error } = await supabase.auth.refreshSession();
+          if (error) {
+            console.error('Failed to refresh session:', error);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Session keep-alive error:', error);
+    }
+  };
+
+  // Check every 2 minutes
+  const interval = setInterval(keepSessionAlive, 2 * 60 * 1000);
+  
+  // Initial check
+  keepSessionAlive();
+  
+  return () => clearInterval(interval);
+}, [user]);
+
   // File upload state
   const [jobFile, setJobFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
