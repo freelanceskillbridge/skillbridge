@@ -153,7 +153,7 @@ useEffect(() => {
   return () => clearInterval(interval);
 }, [user]);
 
-  // File upload state
+  // File upload state - NOW OPTIONAL
   const [jobFile, setJobFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   
@@ -319,22 +319,27 @@ useEffect(() => {
   const handleCreateJob = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!jobFile) {
-      toast({
-        title: 'File required',
-        description: 'Please select a job file',
-        variant: 'destructive',
-      });
-      return;
-    }
-
     setIsUploading(true);
 
     try {
-      // Upload file silently
-      const cloudinaryUrl = await uploadToCloudinary(jobFile);
+      let cloudinaryUrl = null;
+      let jobFileName = null;
+      let jobFileType = null;
 
-      // Create job with file URL
+      // Upload file only if provided (OPTIONAL)
+      if (jobFile) {
+        try {
+          cloudinaryUrl = await uploadToCloudinary(jobFile);
+          jobFileName = jobFile.name;
+          jobFileType = jobFile.type;
+          console.log('File uploaded successfully:', cloudinaryUrl);
+        } catch (uploadError) {
+          console.warn('Cloudinary upload failed, continuing without file:', uploadError);
+          // Continue without file - don't block job creation
+        }
+      }
+
+      // Create job with or without file URL
       const { data: jobData, error } = await supabase
         .from('jobs')
         .insert([{
@@ -346,9 +351,9 @@ useEffect(() => {
           required_tier: jobForm.required_tier as 'none' | 'regular' | 'pro' | 'vip',
           estimated_time: jobForm.estimated_time || null,
           category_id: jobForm.category_id || null,
-          job_file_url: cloudinaryUrl,
-          job_file_name: jobFile.name,
-          job_file_type: jobFile.type,
+          job_file_url: cloudinaryUrl,  // Can be null
+          job_file_name: jobFileName,   // Can be null
+          job_file_type: jobFileType,   // Can be null
         }])
         .select()
         .single();
@@ -357,7 +362,7 @@ useEffect(() => {
 
       toast({
         title: 'Job created successfully',
-        description: 'New job has been created',
+        description: jobFile ? 'Job created with file' : 'Job created without file',
       });
 
       setIsJobDialogOpen(false);
@@ -368,7 +373,7 @@ useEffect(() => {
       console.error('Error creating job:', error);
       toast({
         title: 'Error creating job',
-        description: 'Failed to create job',
+        description: error.message || 'Failed to create job',
         variant: 'destructive',
       });
     } finally {
@@ -394,13 +399,24 @@ useEffect(() => {
         category_id: jobForm.category_id || null,
       };
 
-      // If a new file is selected, upload it
+      // If a new file is selected, upload it (OPTIONAL)
       if (jobFile) {
-        const cloudinaryUrl = await uploadToCloudinary(jobFile);
-        
-        updateData.job_file_url = cloudinaryUrl;
-        updateData.job_file_name = jobFile.name;
-        updateData.job_file_type = jobFile.type;
+        try {
+          const cloudinaryUrl = await uploadToCloudinary(jobFile);
+          
+          updateData.job_file_url = cloudinaryUrl;
+          updateData.job_file_name = jobFile.name;
+          updateData.job_file_type = jobFile.type;
+          console.log('File updated successfully:', cloudinaryUrl);
+        } catch (uploadError) {
+          console.warn('Cloudinary upload failed, keeping existing file:', uploadError);
+          // Don't update file fields if upload fails
+        }
+      } else if (!jobFile && editingJob.job_file_url) {
+        // Keep existing file if no new file selected
+        updateData.job_file_url = editingJob.job_file_url;
+        updateData.job_file_name = editingJob.job_file_name;
+        updateData.job_file_type = editingJob.job_file_type;
       }
 
       const { error } = await supabase
@@ -423,7 +439,7 @@ useEffect(() => {
     } catch (error: any) {
       toast({ 
         title: 'Error', 
-        description: 'Failed to update job', 
+        description: error.message || 'Failed to update job', 
         variant: 'destructive' 
       });
     } finally {
@@ -656,10 +672,10 @@ useEffect(() => {
                       />
                     </div>
                     
-                    {/* File Upload Section */}
+                    {/* File Upload Section - NOW OPTIONAL */}
                     <div className="col-span-2 space-y-4">
                       <div className="space-y-2">
-                        <Label>Job File *</Label>
+                        <Label>Job File (Optional)</Label>
                         
                         {/* Hidden file input */}
                         <input
@@ -676,10 +692,10 @@ useEffect(() => {
                             <div className="border-2 border-dashed border-border rounded-lg p-6 text-center hover:border-primary/50 transition-colors">
                               <Upload className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
                               <h3 className="font-medium text-foreground mb-2">
-                                Select job file
+                                Select job file (Optional)
                               </h3>
                               <p className="text-sm text-muted-foreground mb-4">
-                                Select the job file to upload
+                                Select the job file to upload - optional
                               </p>
                               <Button
                                 type="button"
@@ -813,7 +829,7 @@ useEffect(() => {
                     type="submit" 
                     variant="hero" 
                     className="w-full"
-                    disabled={isUploading || (!editingJob && !jobFile)}
+                    disabled={isUploading}
                   >
                     {isUploading ? (
                       <>
