@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import DashboardLayout from '@/components/dashboard/DashboardLayout';
@@ -23,7 +23,6 @@ import {
 } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
 import {
-  Users,
   Briefcase,
   FileText,
   DollarSign,
@@ -34,8 +33,6 @@ import {
   XCircle,
   Clock,
   Search,
-  Eye,
-  ArrowLeft,
   Upload,
   X,
   FileIcon,
@@ -82,7 +79,6 @@ interface Submission {
   user_id: string;
   user_email: string;
   user_name: string | null;
-  // Original columns for fallback
   file_url?: string | null;
   worker_file_url?: string | null;
   file_name?: string | null;
@@ -98,12 +94,17 @@ const Admin = () => {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [allSubmissions, setAllSubmissions] = useState<Submission[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
   const [isJobDialogOpen, setIsJobDialogOpen] = useState(false);
   const [editingJob, setEditingJob] = useState<Job | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
   const [dataSource, setDataSource] = useState<'view' | 'table'>('view');
+  const [hasLoaded, setHasLoaded] = useState({
+    jobs: false,
+    categories: false,
+    submissions: false
+  });
   
   // Job form state
   const [jobForm, setJobForm] = useState({
@@ -117,82 +118,88 @@ const Admin = () => {
     category_id: '',
   });
 
-  // Add this near other useEffects in admin.tsx
-useEffect(() => {
-  // Keep session alive with periodic refresh
-  const keepSessionAlive = async () => {
-    if (!user) return;
-    
-    try {
-      // Check if session is about to expire (within 5 minutes)
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (session) {
-        const expiresAt = session.expires_at ? session.expires_at * 1000 : 0;
-        const fiveMinutesFromNow = Date.now() + 5 * 60 * 1000;
-        
-        if (expiresAt < fiveMinutesFromNow) {
-          console.log('Refreshing admin session...');
-          const { error } = await supabase.auth.refreshSession();
-          if (error) {
-            console.error('Failed to refresh session:', error);
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Session keep-alive error:', error);
-    }
-  };
-
-  // Check every 2 minutes
-  const interval = setInterval(keepSessionAlive, 2 * 60 * 1000);
-  
-  // Initial check
-  keepSessionAlive();
-  
-  return () => clearInterval(interval);
-}, [user]);
-
-  // File upload state - NOW OPTIONAL
+  // File upload state - OPTIONAL
   const [jobFile, setJobFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   
   // File input ref
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Redirect if not admin
   useEffect(() => {
     if (!authLoading && (!user || !isAdmin)) {
       navigate('/dashboard');
     }
   }, [user, isAdmin, authLoading, navigate]);
 
+  // Fetch initial data once
   useEffect(() => {
-    fetchData();
+    if (user && isAdmin && !authLoading) {
+      fetchInitialData();
+    }
+  }, [user, isAdmin, authLoading]);
+
+  // Fetch data when dataSource changes
+  useEffect(() => {
+    if (user && isAdmin && hasLoaded.submissions) {
+      fetchSubmissions();
+    }
   }, [dataSource]);
 
-  const fetchData = async () => {
+  // Fetch submissions when tab changes to submissions
+  useEffect(() => {
+    if (user && isAdmin && activeTab === 'submissions' && !hasLoaded.submissions) {
+      fetchSubmissions();
+    }
+  }, [activeTab]);
+
+  const fetchInitialData = async () => {
+    if (hasLoaded.jobs && hasLoaded.categories) return;
+    
+    setIsLoading(true);
     try {
       const [jobsResult, categoriesResult] = await Promise.all([
         supabase
           .from('jobs')
           .select('*, category:job_categories(name)')
-          .order('created_at', { ascending: false }),
+          .order('created_at', { ascending: false })
+          .limit(50), // Reduced from all records
         supabase.from('job_categories').select('*').order('name'),
       ]);
 
-      if (jobsResult.data) setJobs(jobsResult.data as unknown as Job[]);
-      if (categoriesResult.data) setCategories(categoriesResult.data);
+      if (jobsResult.data) {
+        setJobs(jobsResult.data as unknown as Job[]);
+        setHasLoaded(prev => ({ ...prev, jobs: true }));
+      }
+      if (categoriesResult.data) {
+        setCategories(categoriesResult.data);
+        setHasLoaded(prev => ({ ...prev, categories: true }));
+      }
+    } catch (error) {
+      console.error('Error fetching initial data:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to load data',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-      // Fetch submissions from the VIEW
+  const fetchSubmissions = async () => {
+    if (hasLoaded.submissions && dataSource === 'view') return;
+    
+    setIsLoading(true);
+    try {
       let submissionsResult;
       if (dataSource === 'view') {
         submissionsResult = await supabase
           .from('admin_submissions_view')
           .select('*')
           .order('created_at', { ascending: false })
-          .limit(100);
+          .limit(50); // Reduced from 100
       } else {
-        // Fallback to direct table join
         submissionsResult = await supabase
           .from('job_submissions')
           .select(`
@@ -201,13 +208,10 @@ useEffect(() => {
             profile:profiles(email, full_name)
           `)
           .order('created_at', { ascending: false })
-          .limit(100);
+          .limit(50); // Reduced from 100
       }
 
       if (submissionsResult.data) {
-        console.log(`Fetched ${submissionsResult.data.length} submissions from ${dataSource}`);
-        
-        // Format submissions based on data source
         let formattedSubmissions: Submission[];
         if (dataSource === 'view') {
           formattedSubmissions = submissionsResult.data.map((sub: any) => ({
@@ -222,7 +226,6 @@ useEffect(() => {
             user_id: sub.user_id,
             user_email: sub.user_email,
             user_name: sub.user_name,
-            // Keep original columns for compatibility
             file_url: sub.file_url,
             worker_file_url: sub.worker_file_url,
             file_name: sub.file_name,
@@ -249,12 +252,13 @@ useEffect(() => {
         }
         
         setAllSubmissions(formattedSubmissions);
+        setHasLoaded(prev => ({ ...prev, submissions: true }));
       }
     } catch (error) {
-      console.error('Error fetching data:', error);
+      console.error('Error fetching submissions:', error);
       toast({
         title: 'Error',
-        description: 'Failed to load data',
+        description: 'Failed to load submissions',
         variant: 'destructive',
       });
     } finally {
@@ -280,21 +284,18 @@ useEffect(() => {
   // Get pending submissions count for stats
   const pendingSubmissions = allSubmissions.filter(sub => sub.status === 'pending');
 
-  // Trigger file input click
   const handleFileUploadClick = () => {
     if (fileInputRef.current) {
       fileInputRef.current.click();
     }
   };
 
-  // Handle file selection
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
     const file = files[0];
     
-    // Validate file size (max 100MB)
     if (file.size > 100 * 1024 * 1024) {
       toast({
         title: 'File too large',
@@ -306,7 +307,6 @@ useEffect(() => {
 
     setJobFile(file);
     
-    // Reset file input
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -332,14 +332,11 @@ useEffect(() => {
           cloudinaryUrl = await uploadToCloudinary(jobFile);
           jobFileName = jobFile.name;
           jobFileType = jobFile.type;
-          console.log('File uploaded successfully:', cloudinaryUrl);
         } catch (uploadError) {
           console.warn('Cloudinary upload failed, continuing without file:', uploadError);
-          // Continue without file - don't block job creation
         }
       }
 
-      // Create job with or without file URL
       const { data: jobData, error } = await supabase
         .from('jobs')
         .insert([{
@@ -351,9 +348,9 @@ useEffect(() => {
           required_tier: jobForm.required_tier as 'none' | 'regular' | 'pro' | 'vip',
           estimated_time: jobForm.estimated_time || null,
           category_id: jobForm.category_id || null,
-          job_file_url: cloudinaryUrl,  // Can be null
-          job_file_name: jobFileName,   // Can be null
-          job_file_type: jobFileType,   // Can be null
+          job_file_url: cloudinaryUrl,
+          job_file_name: jobFileName,
+          job_file_type: jobFileType,
         }])
         .select()
         .single();
@@ -367,7 +364,17 @@ useEffect(() => {
 
       setIsJobDialogOpen(false);
       resetJobForm();
-      fetchData();
+      
+      // Refresh jobs list
+      const jobsResult = await supabase
+        .from('jobs')
+        .select('*, category:job_categories(name)')
+        .order('created_at', { ascending: false })
+        .limit(50);
+        
+      if (jobsResult.data) {
+        setJobs(jobsResult.data as unknown as Job[]);
+      }
 
     } catch (error: any) {
       console.error('Error creating job:', error);
@@ -399,21 +406,16 @@ useEffect(() => {
         category_id: jobForm.category_id || null,
       };
 
-      // If a new file is selected, upload it (OPTIONAL)
       if (jobFile) {
         try {
           const cloudinaryUrl = await uploadToCloudinary(jobFile);
-          
           updateData.job_file_url = cloudinaryUrl;
           updateData.job_file_name = jobFile.name;
           updateData.job_file_type = jobFile.type;
-          console.log('File updated successfully:', cloudinaryUrl);
         } catch (uploadError) {
           console.warn('Cloudinary upload failed, keeping existing file:', uploadError);
-          // Don't update file fields if upload fails
         }
       } else if (!jobFile && editingJob.job_file_url) {
-        // Keep existing file if no new file selected
         updateData.job_file_url = editingJob.job_file_url;
         updateData.job_file_name = editingJob.job_file_name;
         updateData.job_file_type = editingJob.job_file_type;
@@ -434,7 +436,17 @@ useEffect(() => {
       setIsJobDialogOpen(false);
       setEditingJob(null);
       resetJobForm();
-      fetchData();
+      
+      // Refresh jobs list
+      const jobsResult = await supabase
+        .from('jobs')
+        .select('*, category:job_categories(name)')
+        .order('created_at', { ascending: false })
+        .limit(50);
+        
+      if (jobsResult.data) {
+        setJobs(jobsResult.data as unknown as Job[]);
+      }
 
     } catch (error: any) {
       toast({ 
@@ -456,7 +468,9 @@ useEffect(() => {
       if (error) throw error;
       
       toast({ title: 'Success', description: 'Job deleted successfully' });
-      fetchData();
+      
+      // Update local state
+      setJobs(prev => prev.filter(job => job.id !== jobId));
     } catch (error: any) {
       toast({ 
         title: 'Error', 
@@ -475,7 +489,10 @@ useEffect(() => {
       
       if (error) throw error;
       
-      fetchData();
+      // Update local state
+      setJobs(prev => prev.map(j => 
+        j.id === job.id ? { ...j, is_active: !j.is_active } : j
+      ));
     } catch (error: any) {
       toast({ 
         title: 'Error', 
@@ -503,7 +520,11 @@ useEffect(() => {
         title: 'Success', 
         description: `Submission ${status}` 
       });
-      fetchData();
+      
+      // Update local state
+      setAllSubmissions(prev => prev.map(sub => 
+        sub.id === submissionId ? { ...sub, status } : sub
+      ));
     } catch (error: any) {
       toast({ 
         title: 'Error', 
@@ -583,11 +604,29 @@ useEffect(() => {
     },
   ];
 
-  if (authLoading || isLoading) {
+  // Loading skeleton
+  if (authLoading) {
     return (
       <DashboardLayout>
-        <div className="flex items-center justify-center h-64">
-          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
+        <div className="space-y-6">
+          {/* Header skeleton */}
+          <div className="flex justify-between items-center">
+            <div>
+              <div className="h-8 w-48 bg-gray-200 rounded animate-pulse mb-2"></div>
+              <div className="h-4 w-64 bg-gray-200 rounded animate-pulse"></div>
+            </div>
+            <div className="h-10 w-32 bg-gray-200 rounded animate-pulse"></div>
+          </div>
+          
+          {/* Stats skeleton */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            {[...Array(4)].map((_, i) => (
+              <div key={i} className="h-20 bg-gray-200 rounded animate-pulse"></div>
+            ))}
+          </div>
+          
+          {/* Content skeleton */}
+          <div className="h-64 bg-gray-200 rounded animate-pulse"></div>
         </div>
       </DashboardLayout>
     );
@@ -672,12 +711,11 @@ useEffect(() => {
                       />
                     </div>
                     
-                    {/* File Upload Section - NOW OPTIONAL */}
+                    {/* File Upload Section - OPTIONAL */}
                     <div className="col-span-2 space-y-4">
                       <div className="space-y-2">
                         <Label>Job File (Optional)</Label>
                         
-                        {/* Hidden file input */}
                         <input
                           type="file"
                           ref={fileInputRef}
@@ -883,65 +921,78 @@ useEffect(() => {
         {/* Content */}
         {activeTab === 'jobs' && (
           <div className="space-y-4">
-            {jobs.map((job) => (
-              <div key={job.id} className="glass-card p-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3">
-                      <h3 className="font-semibold text-foreground">{job.title}</h3>
-                      <span className={`text-xs px-2 py-0.5 rounded-full ${
-                        job.is_active 
-                          ? 'bg-green-400/10 text-green-400' 
-                          : 'bg-red-400/10 text-red-400'
-                      }`}>
-                        {job.is_active ? 'Active' : 'Inactive'}
-                      </span>
-                      {job.job_file_url && (
-                        <span className="text-xs px-2 py-0.5 rounded-full bg-blue-400/10 text-blue-400 flex items-center gap-1">
-                          <FileIcon className="w-3 h-3" />
-                          Has File
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-4 mt-1 text-sm text-muted-foreground">
-                      <span>{job.category?.name || 'General'}</span>
-                      <span>${job.payment_amount}</span>
-                      <span>{job.required_tier.toUpperCase()}</span>
-                      <span>{job.current_submissions} submissions</span>
-                    </div>
+            {isLoading && jobs.length === 0 ? (
+              <div className="space-y-3">
+                {[...Array(3)].map((_, i) => (
+                  <div key={i} className="glass-card p-4">
+                    <div className="h-6 w-3/4 bg-gray-200 rounded animate-pulse mb-2"></div>
+                    <div className="h-4 w-1/2 bg-gray-200 rounded animate-pulse"></div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      onClick={() => handleToggleJobStatus(job)}
-                      title={job.is_active ? 'Deactivate job' : 'Activate job'}
-                    >
-                      {job.is_active ? 
-                        <XCircle className="w-4 h-4" /> : 
-                        <CheckCircle className="w-4 h-4" />
-                      }
-                    </Button>
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      onClick={() => openEditDialog(job)}
-                      title="Edit job"
-                    >
-                      <Edit className="w-4 h-4" />
-                    </Button>
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      onClick={() => handleDeleteJob(job.id)}
-                      title="Delete job"
-                    >
-                      <Trash className="w-4 h-4 text-destructive" />
-                    </Button>
-                  </div>
-                </div>
+                ))}
               </div>
-            ))}
+            ) : (
+              <>
+                {jobs.map((job) => (
+                  <div key={job.id} className="glass-card p-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-3">
+                          <h3 className="font-semibold text-foreground">{job.title}</h3>
+                          <span className={`text-xs px-2 py-0.5 rounded-full ${
+                            job.is_active 
+                              ? 'bg-green-400/10 text-green-400' 
+                              : 'bg-red-400/10 text-red-400'
+                          }`}>
+                            {job.is_active ? 'Active' : 'Inactive'}
+                          </span>
+                          {job.job_file_url && (
+                            <span className="text-xs px-2 py-0.5 rounded-full bg-blue-400/10 text-blue-400 flex items-center gap-1">
+                              <FileIcon className="w-3 h-3" />
+                              Has File
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-4 mt-1 text-sm text-muted-foreground">
+                          <span>{job.category?.name || 'General'}</span>
+                          <span>${job.payment_amount}</span>
+                          <span>{job.required_tier.toUpperCase()}</span>
+                          <span>{job.current_submissions} submissions</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          onClick={() => handleToggleJobStatus(job)}
+                          title={job.is_active ? 'Deactivate job' : 'Activate job'}
+                        >
+                          {job.is_active ? 
+                            <XCircle className="w-4 h-4" /> : 
+                            <CheckCircle className="w-4 h-4" />
+                          }
+                        </Button>
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          onClick={() => openEditDialog(job)}
+                          title="Edit job"
+                        >
+                          <Edit className="w-4 h-4" />
+                        </Button>
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          onClick={() => handleDeleteJob(job.id)}
+                          title="Delete job"
+                        >
+                          <Trash className="w-4 h-4 text-destructive" />
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
           </div>
         )}
 
@@ -999,7 +1050,16 @@ useEffect(() => {
               </div>
             </div>
 
-            {filteredSubmissions.length > 0 ? (
+            {isLoading && allSubmissions.length === 0 ? (
+              <div className="space-y-4">
+                {[...Array(3)].map((_, i) => (
+                  <div key={i} className="glass-card p-6">
+                    <div className="h-6 w-3/4 bg-gray-200 rounded animate-pulse mb-4"></div>
+                    <div className="h-4 w-1/2 bg-gray-200 rounded animate-pulse"></div>
+                  </div>
+                ))}
+              </div>
+            ) : filteredSubmissions.length > 0 ? (
               <div className="space-y-4">
                 {filteredSubmissions.map((submission) => (
                   <div key={submission.id} className="glass-card p-6">
@@ -1076,7 +1136,6 @@ useEffect(() => {
                     </div>
 
                     <div className="space-y-4">
-                      {/* Worker's Submitted File */}
                       {submission.display_file_url && (
                         <div className="space-y-2">
                           <h4 className="font-medium text-foreground flex items-center gap-2">
@@ -1113,7 +1172,6 @@ useEffect(() => {
                         </div>
                       )}
                       
-                      {/* Submission Content */}
                       <div className="space-y-2">
                         <h4 className="font-medium text-foreground">Submission Notes</h4>
                         <div className="p-4 bg-secondary/30 rounded-lg whitespace-pre-wrap text-sm">
@@ -1172,6 +1230,9 @@ useEffect(() => {
                     </span>
                   </div>
                 ))}
+                {jobs.length === 0 && (
+                  <p className="text-muted-foreground text-center py-4">No jobs yet</p>
+                )}
               </div>
             </div>
             
