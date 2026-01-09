@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
@@ -19,12 +19,19 @@ import {
   FileText,
   ExternalLink,
   Briefcase,
+  Download,
+  AlertCircle,
+  RefreshCw,
 } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
 
 interface Submission {
   id: string;
   submission_content: string;
-  submission_url: string | null;
+  file_url: string | null;
+  worker_file_url: string | null;
+  file_name: string | null;
+  worker_file_name: string | null;
   status: 'pending' | 'approved' | 'rejected';
   admin_feedback: string | null;
   payment_amount: number;
@@ -40,44 +47,121 @@ interface Submission {
 const Submissions = () => {
   const { user, isLoading: authLoading } = useAuth();
   const navigate = useNavigate();
+  const { toast } = useToast();
+  
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>('all');
 
+  // Redirect if not authenticated
   useEffect(() => {
     if (!authLoading && !user) {
       navigate('/auth');
     }
   }, [user, authLoading, navigate]);
 
-  useEffect(() => {
-    const fetchSubmissions = async () => {
-      if (!user) return;
+  // Fetch submissions with proper error handling
+  const fetchSubmissions = useCallback(async () => {
+    if (!user) return;
 
-      const { data } = await supabase
+    try {
+      const { data, error } = await supabase
         .from('job_submissions')
         .select(`
           id,
           submission_content,
-          submission_url,
+          file_url,
+          worker_file_url,
+          file_name,
+          worker_file_name,
           status,
           admin_feedback,
           payment_amount,
           created_at,
           reviewed_at,
-          job:jobs(id, title, category:job_categories(name))
+          job:jobs(
+            id,
+            title,
+            category:job_categories(name)
+          )
         `)
         .eq('user_id', user.id)
         .order('created_at', { ascending: false });
 
-      if (data) {
-        setSubmissions(data as unknown as Submission[]);
+      if (error) {
+        console.error('Error fetching submissions:', error);
+        toast({
+          title: 'Error',
+          description: 'Failed to load submissions',
+          variant: 'destructive',
+        });
+        return;
       }
-      setIsLoading(false);
-    };
 
-    fetchSubmissions();
-  }, [user]);
+      if (data) {
+        // Transform the data to match our interface
+        const formattedData = data.map((item: any) => ({
+          ...item,
+          job: item.job ? {
+            id: item.job.id,
+            title: item.job.title,
+            category: item.job.category
+          } : null
+        }));
+        
+        setSubmissions(formattedData);
+      }
+    } catch (error) {
+      console.error('Error fetching submissions:', error);
+      toast({
+        title: 'Error',
+        description: 'An unexpected error occurred',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLoading(false);
+      setIsRefreshing(false);
+    }
+  }, [user, toast]);
+
+  // Initial fetch
+  useEffect(() => {
+    if (user) {
+      fetchSubmissions();
+    }
+  }, [user, fetchSubmissions]);
+
+  // Set up real-time subscription
+  useEffect(() => {
+    if (!user) return;
+
+    const channel = supabase
+      .channel('submissions-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'job_submissions',
+          filter: `user_id=eq.${user.id}`
+        },
+        () => {
+          // Refresh submissions when they change
+          fetchSubmissions();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user, fetchSubmissions]);
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    await fetchSubmissions();
+  };
 
   const getStatusIcon = (status: string) => {
     switch (status) {
@@ -101,6 +185,16 @@ const Submissions = () => {
     }
   };
 
+  // Get the actual file URL (check both file_url and worker_file_url)
+  const getFileUrl = (submission: Submission): string | null => {
+    return submission.file_url || submission.worker_file_url;
+  };
+
+  // Get the actual file name
+  const getFileName = (submission: Submission): string | null => {
+    return submission.file_name || submission.worker_file_name || 'Submitted File';
+  };
+
   const filteredSubmissions = submissions.filter((sub) => {
     if (statusFilter === 'all') return true;
     return sub.status === statusFilter;
@@ -111,6 +205,51 @@ const Submissions = () => {
     pending: submissions.filter((s) => s.status === 'pending').length,
     approved: submissions.filter((s) => s.status === 'approved').length,
     rejected: submissions.filter((s) => s.status === 'rejected').length,
+  };
+
+  const handleDownloadFile = async (submission: Submission) => {
+    const fileUrl = getFileUrl(submission);
+    const fileName = getFileName(submission);
+    
+    if (!fileUrl) {
+      toast({
+        title: 'No file available',
+        description: 'This submission does not have an attached file',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    try {
+      // For Cloudinary URLs, we can download directly
+      if (fileUrl.includes('cloudinary.com')) {
+        window.open(fileUrl, '_blank');
+      } else {
+        // For other URLs, try to download
+        const response = await fetch(fileUrl);
+        const blob = await response.blob();
+        const downloadUrl = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = downloadUrl;
+        a.download = fileName || 'submission_file';
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(downloadUrl);
+        document.body.removeChild(a);
+      }
+      
+      toast({
+        title: 'Download started',
+        description: 'Your file download has started',
+      });
+    } catch (error) {
+      console.error('Download error:', error);
+      toast({
+        title: 'Download failed',
+        description: 'Could not download the file. Try opening it directly.',
+        variant: 'destructive',
+      });
+    }
   };
 
   if (authLoading) {
@@ -132,9 +271,21 @@ const Submissions = () => {
               Track the status of your submitted work
             </p>
           </div>
-          <Button variant="hero" asChild>
-            <Link to="/jobs">Find More Jobs</Link>
-          </Button>
+          <div className="flex items-center gap-3">
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+              className="flex items-center gap-2"
+            >
+              <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+              {isRefreshing ? 'Refreshing...' : 'Refresh'}
+            </Button>
+            <Button variant="hero" asChild>
+              <Link to="/jobs">Find More Jobs</Link>
+            </Button>
+          </div>
         </div>
 
         {/* Stats */}
@@ -185,19 +336,26 @@ const Submissions = () => {
           </div>
         </div>
 
-        {/* Filter */}
-        <div className="flex items-center gap-4">
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-40">
-              <SelectValue placeholder="Filter by status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Status</SelectItem>
-              <SelectItem value="pending">Pending</SelectItem>
-              <SelectItem value="approved">Approved</SelectItem>
-              <SelectItem value="rejected">Rejected</SelectItem>
-            </SelectContent>
-          </Select>
+        {/* Filter and Info */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="w-40">
+                <SelectValue placeholder="Filter by status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Status</SelectItem>
+                <SelectItem value="pending">Pending</SelectItem>
+                <SelectItem value="approved">Approved</SelectItem>
+                <SelectItem value="rejected">Rejected</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <AlertCircle className="w-4 h-4" />
+            <span>Updates are shown in real-time</span>
+          </div>
         </div>
 
         {/* Submissions List */}
@@ -209,70 +367,108 @@ const Submissions = () => {
           </div>
         ) : filteredSubmissions.length > 0 ? (
           <div className="space-y-4">
-            {filteredSubmissions.map((submission) => (
-              <div key={submission.id} className="glass-card p-6">
-                <div className="flex flex-col lg:flex-row lg:items-center gap-4">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3 mb-2">
-                      {getStatusIcon(submission.status)}
-                      <h3 className="font-semibold text-foreground">
-                        {submission.job?.title || 'Unknown Job'}
-                      </h3>
-                      <span className={`text-xs px-2 py-0.5 rounded-full border ${getStatusColor(submission.status)}`}>
-                        {submission.status}
-                      </span>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
-                      <span>{submission.job?.category?.name || 'General'}</span>
-                      <span>
-                        Submitted {new Date(submission.created_at).toLocaleDateString()}
-                      </span>
-                      {submission.reviewed_at && (
-                        <span>
-                          Reviewed {new Date(submission.reviewed_at).toLocaleDateString()}
+            {filteredSubmissions.map((submission) => {
+              const fileUrl = getFileUrl(submission);
+              const fileName = getFileName(submission);
+              
+              return (
+                <div key={submission.id} className="glass-card p-6">
+                  <div className="flex flex-col lg:flex-row lg:items-center gap-4">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-3 mb-2">
+                        {getStatusIcon(submission.status)}
+                        <h3 className="font-semibold text-foreground">
+                          {submission.job?.title || 'Unknown Job'}
+                        </h3>
+                        <span className={`text-xs px-2 py-0.5 rounded-full border ${getStatusColor(submission.status)}`}>
+                          {submission.status.toUpperCase()}
                         </span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
+                        <span>{submission.job?.category?.name || 'General'}</span>
+                        <span>
+                          Submitted {new Date(submission.created_at).toLocaleDateString()}
+                        </span>
+                        {submission.reviewed_at && (
+                          <span>
+                            Reviewed {new Date(submission.reviewed_at).toLocaleDateString()}
+                          </span>
+                        )}
+                      </div>
+                      
+                      {/* Submission Content */}
+                      {submission.submission_content && (
+                        <div className="mt-3 p-3 rounded-lg bg-secondary/50">
+                          <p className="text-sm text-foreground">
+                            <span className="font-medium">Notes: </span>
+                            {submission.submission_content}
+                          </p>
+                        </div>
+                      )}
+                      
+                      {/* Admin Feedback */}
+                      {submission.admin_feedback && (
+                        <div className="mt-3 p-3 rounded-lg bg-blue-400/10 border border-blue-400/20">
+                          <p className="text-sm text-blue-400">
+                            <span className="font-medium">Admin Feedback: </span>
+                            {submission.admin_feedback}
+                          </p>
+                        </div>
                       )}
                     </div>
-                    {submission.admin_feedback && (
-                      <div className="mt-3 p-3 rounded-lg bg-secondary/50">
-                        <p className="text-sm text-muted-foreground">
-                          <span className="font-medium text-foreground">Feedback: </span>
-                          {submission.admin_feedback}
+                    <div className="flex flex-col sm:flex-row items-center gap-4">
+                      <div className="text-center sm:text-right">
+                        <div className="flex items-center justify-center sm:justify-end gap-1 text-primary">
+                          <DollarSign className="w-4 h-4" />
+                          <span className="text-xl font-bold">{submission.payment_amount}</span>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          {submission.status === 'approved' ? 'Earned' : 
+                           submission.status === 'rejected' ? 'Not Paid' : 'Potential'}
                         </p>
                       </div>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <div className="text-right">
-                      <div className="flex items-center gap-1 text-primary">
-                        <DollarSign className="w-4 h-4" />
-                        <span className="text-xl font-bold">{submission.payment_amount}</span>
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        {submission.status === 'approved' ? 'Earned' : 'Potential'}
-                      </p>
+                      
+                      {/* File Actions */}
+                      {fileUrl && (
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => window.open(fileUrl, '_blank')}
+                            className="flex items-center gap-1"
+                            title="View file"
+                          >
+                            <ExternalLink className="w-4 h-4" />
+                            View
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleDownloadFile(submission)}
+                            className="flex items-center gap-1"
+                            title="Download file"
+                          >
+                            <Download className="w-4 h-4" />
+                            Download
+                          </Button>
+                        </div>
+                      )}
                     </div>
-                    {submission.submission_url && (
-                      <a
-                        href={submission.submission_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="p-2 rounded-lg bg-secondary hover:bg-secondary/70 transition-colors"
-                      >
-                        <ExternalLink className="w-5 h-5 text-muted-foreground" />
-                      </a>
-                    )}
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <div className="glass-card p-12 text-center">
             <Briefcase className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
-            <h3 className="text-xl font-semibold text-foreground mb-2">No submissions yet</h3>
+            <h3 className="text-xl font-semibold text-foreground mb-2">
+              {statusFilter === 'all' ? 'No submissions yet' : 'No matching submissions'}
+            </h3>
             <p className="text-muted-foreground mb-4">
-              Start working on jobs to see your submissions here
+              {statusFilter === 'all' 
+                ? 'Start working on jobs to see your submissions here'
+                : 'No submissions match the selected filter'}
             </p>
             <Button variant="hero" asChild>
               <Link to="/jobs">Browse Available Jobs</Link>

@@ -44,14 +44,6 @@ interface Job {
   job_file_type: string | null;
 }
 
-interface UploadedFile {
-  id: string;
-  name: string;
-  size: number;
-  type: string;
-  file: File;
-}
-
 const JobDetail = () => {
   const { id } = useParams<{ id: string }>();
   const { user, profile, isLoading: authLoading } = useAuth();
@@ -65,7 +57,7 @@ const JobDetail = () => {
   const [submissionContent, setSubmissionContent] = useState('');
   
   // File upload state
-  const [uploadedFile, setUploadedFile] = useState<UploadedFile | null>(null);
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   
   // File input ref
@@ -170,15 +162,7 @@ const JobDetail = () => {
       return;
     }
 
-    const uploadedFile: UploadedFile = {
-      id: Math.random().toString(36).substring(2) + Date.now().toString(36),
-      name: file.name,
-      size: file.size,
-      type: file.type,
-      file: file,
-    };
-
-    setUploadedFile(uploadedFile);
+    setUploadedFile(file);
     
     // Reset file input
     if (fileInputRef.current) {
@@ -190,7 +174,7 @@ const JobDetail = () => {
     setUploadedFile(null);
   };
 
-  // Handle job file download - AUTOMATIC download from Cloudinary
+  // Handle job file download
   const handleDownloadJobFile = async () => {
     if (!job?.job_file_url) {
       toast({
@@ -202,29 +186,22 @@ const JobDetail = () => {
     }
 
     try {
-      // Fetch the file from Cloudinary URL
-      const response = await fetch(job.job_file_url);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch file: ${response.status}`);
+      // For Cloudinary URLs, open in new tab
+      if (job.job_file_url.includes('cloudinary.com')) {
+        window.open(job.job_file_url, '_blank');
+      } else {
+        // For other URLs, try to download
+        const response = await fetch(job.job_file_url);
+        const blob = await response.blob();
+        const downloadUrl = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = downloadUrl;
+        link.download = job.job_file_name || 'job_file';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(downloadUrl);
       }
-      
-      const blob = await response.blob();
-      const downloadUrl = window.URL.createObjectURL(blob);
-      
-      // Create a temporary link for download
-      const link = document.createElement('a');
-      link.href = downloadUrl;
-      link.download = job.job_file_name || 'job_file';
-      
-      // Append to body, click, and remove
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      
-      // Clean up the URL object
-      window.URL.revokeObjectURL(downloadUrl);
-      
-      // No toast notification - silent download as requested
       
     } catch (error) {
       console.error('Download error:', error);
@@ -236,33 +213,14 @@ const JobDetail = () => {
     }
   };
 
-  // Handle file upload (no Cloudinary notifications)
-  const handleUploadToCloudinary = async (): Promise<string> => {
-    if (!uploadedFile) {
-      throw new Error('No file selected');
-    }
-
-    setIsUploading(true);
-
-    try {
-      // Upload to Cloudinary silently
-      const cloudinaryUrl = await uploadToCloudinary(uploadedFile.file);
-      return cloudinaryUrl;
-
-    } catch (error: any) {
-      console.error('Upload error:', error);
-      throw new Error('Failed to upload file');
-    } finally {
-      setIsUploading(false);
-    }
-  };
-
   // Handle work submission
-  const handleSubmitWork = async (cloudinaryUrl?: string) => {
+  const handleSubmitWork = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
     if (!user || !job || !canSubmit()) return;
 
     // Validate required fields
-    if (!uploadedFile && !submissionContent.trim() && !cloudinaryUrl) {
+    if (!uploadedFile && !submissionContent.trim()) {
       toast({
         title: 'Submission Required',
         description: 'Please either upload a file or enter submission content.',
@@ -274,37 +232,65 @@ const JobDetail = () => {
     setIsSubmitting(true);
 
     try {
+      let fileUrl = null;
+      let fileName = null;
+      let fileType = null;
+      let fileSize = null;
+
+      // Upload file if provided
+      if (uploadedFile) {
+        try {
+          setIsUploading(true);
+          fileUrl = await uploadToCloudinary(uploadedFile);
+          fileName = uploadedFile.name;
+          fileType = uploadedFile.type;
+          fileSize = uploadedFile.size;
+          setIsUploading(false);
+        } catch (uploadError: any) {
+          console.error('File upload failed:', uploadError);
+          toast({
+            title: 'File upload failed',
+            description: 'Failed to upload file. Please try submitting as text instead.',
+            variant: 'destructive',
+          });
+          setIsSubmitting(false);
+          setIsUploading(false);
+          return;
+        }
+      }
+
+      // Create submission record
       const submissionData: any = {
         job_id: job.id,
         user_id: user.id,
-        submission_content: submissionContent || `File uploaded: ${uploadedFile?.name || 'Completed work'}`,
+        submission_content: submissionContent || (uploadedFile ? `File uploaded: ${fileName}` : 'Submitted work'),
         payment_amount: job.payment_amount,
+        status: 'pending',
       };
 
-      // Store worker's file URL if available
-      if (cloudinaryUrl) {
-        // Store in BOTH columns to ensure compatibility
-        submissionData.file_url = cloudinaryUrl;
-        submissionData.file_name = uploadedFile?.name || 'submitted_work';
-        submissionData.file_type = uploadedFile?.type || 'application/octet-stream';
-        submissionData.file_size = uploadedFile?.size || 0;
-        
-        // ALSO store in worker_file_url for admin interface
-        submissionData.worker_file_url = cloudinaryUrl;
-        submissionData.worker_file_name = uploadedFile?.name || 'submitted_work';
+      // Store file information if uploaded
+      if (fileUrl) {
+        submissionData.file_url = fileUrl;
+        submissionData.worker_file_url = fileUrl; // Store in both for compatibility
+        submissionData.file_name = fileName;
+        submissionData.worker_file_name = fileName;
+        if (fileType) submissionData.file_type = fileType;
+        if (fileSize) submissionData.file_size = fileSize;
       }
 
-      const { error } = await supabase.from('job_submissions').insert(submissionData);
+      const { error: submissionError } = await supabase
+        .from('job_submissions')
+        .insert([submissionData]);
 
-      if (error) {
-        throw error;
-      }
+      if (submissionError) throw submissionError;
 
       // Update daily tasks used
-      await supabase
-        .from('profiles')
-        .update({ daily_tasks_used: (profile?.daily_tasks_used || 0) + 1 })
-        .eq('id', user.id);
+      if (profile) {
+        await supabase
+          .from('profiles')
+          .update({ daily_tasks_used: (profile.daily_tasks_used || 0) + 1 })
+          .eq('id', user.id);
+      }
 
       // Update job submission count
       await supabase
@@ -321,32 +307,21 @@ const JobDetail = () => {
       setUploadedFile(null);
       setSubmissionContent('');
 
+      // Navigate to submissions page after a delay
+      setTimeout(() => {
+        navigate('/submissions');
+      }, 1500);
+
     } catch (error: any) {
       console.error('Submission error:', error);
       toast({
         title: 'Submission Failed',
-        description: error.message || 'Failed to submit work',
+        description: error.message || 'Failed to submit your work',
         variant: 'destructive',
       });
     } finally {
       setIsSubmitting(false);
-    }
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    // If file is selected, upload it first
-    if (uploadedFile) {
-      try {
-        const cloudinaryUrl = await handleUploadToCloudinary();
-        await handleSubmitWork(cloudinaryUrl);
-      } catch (error) {
-        console.error('Submission error:', error);
-      }
-    } else {
-      // If no file, submit text content only
-      await handleSubmitWork();
+      setIsUploading(false);
     }
   };
 
@@ -463,7 +438,7 @@ const JobDetail = () => {
             )}
           </div>
 
-          {/* JOB FILE DOWNLOAD SECTION - ALWAYS VISIBLE */}
+          {/* JOB FILE DOWNLOAD SECTION */}
           <div className="mb-6 p-4 border border-primary/20 rounded-lg bg-primary/5">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
@@ -514,9 +489,6 @@ const JobDetail = () => {
                     </span>
                   )}
                 </div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Click "Download File" to save the job materials to your device
-                </p>
               </div>
             )}
           </div>
@@ -564,7 +536,7 @@ const JobDetail = () => {
           <div className="glass-card p-6 lg:p-8">
             <h2 className="text-xl font-semibold text-foreground mb-4">Submit Your Work</h2>
             
-            <form onSubmit={handleSubmit} className="space-y-6">
+            <form onSubmit={handleSubmitWork} className="space-y-6">
               {/* File Upload Section */}
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
