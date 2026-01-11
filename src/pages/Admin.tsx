@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
@@ -39,11 +39,10 @@ import {
   User,
   Mail,
   Download,
-  ExternalLink,
   Filter,
   Database,
 } from 'lucide-react';
-import { uploadToCloudinary, formatFileSize } from '@/utils/cloudinary';
+import { uploadToCloudinary, formatFileSize, downloadFile } from '@/utils/cloudinary';
 
 interface Category {
   id: string;
@@ -70,6 +69,7 @@ interface Job {
 interface Submission {
   id: string;
   submission_content: string;
+  submission_url: string | null;
   file_url: string | null;
   worker_file_url: string | null;
   file_name: string | null;
@@ -182,6 +182,7 @@ const Admin = () => {
           formattedSubmissions = submissionsResult.data.map((sub: any) => ({
             id: sub.id,
             submission_content: sub.submission_content,
+            submission_url: sub.submission_url,
             file_url: sub.file_url,
             worker_file_url: sub.worker_file_url,
             file_name: sub.file_name,
@@ -200,6 +201,7 @@ const Admin = () => {
           formattedSubmissions = submissionsResult.data.map((sub: any) => ({
             id: sub.id,
             submission_content: sub.submission_content,
+            submission_url: sub.submission_url,
             file_url: sub.file_url,
             worker_file_url: sub.worker_file_url,
             file_name: sub.file_name,
@@ -230,14 +232,55 @@ const Admin = () => {
     }
   };
 
-  // Get file URL for display
+  // Get file URL for display (check multiple columns)
   const getFileUrl = (submission: Submission): string | null => {
-    return submission.file_url || submission.worker_file_url;
+    return submission.submission_url || submission.file_url || submission.worker_file_url;
   };
 
   // Get file name for display
   const getFileName = (submission: Submission): string | null => {
     return submission.file_name || submission.worker_file_name || 'Submitted File';
+  };
+
+  // Handle download submission file
+  // Handle download submission file - FIXED VERSION
+  const handleDownloadSubmissionFile = async (submission: Submission) => {
+    const fileUrl = getFileUrl(submission);
+    const fileName = getFileName(submission);
+    
+    if (!fileUrl) {
+      toast({
+        title: 'No file available',
+        description: 'This submission does not have an attached file',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    try {
+      // Use the new downloadFile function from cloudinary.ts
+      const success = await downloadFile(fileUrl, fileName || 'submission_file');
+      
+      if (success) {
+        toast({
+          title: 'Download started',
+          description: 'File download has started',
+        });
+      } else {
+        toast({
+          title: 'Download failed',
+          description: 'Failed to download the file',
+          variant: 'destructive',
+        });
+      }
+    } catch (error) {
+      console.error('Download error:', error);
+      toast({
+        title: 'Download failed',
+        description: 'Failed to download the file',
+        variant: 'destructive',
+      });
+    }
   };
 
   // Handle submission review with earnings update
@@ -706,6 +749,8 @@ const Admin = () => {
                       />
                     </div>
                     
+
+                    
                     {/* File Upload Section */}
                     <div className="col-span-2 space-y-4">
                       <div className="space-y-2">
@@ -720,92 +765,93 @@ const Admin = () => {
                           disabled={isUploading}
                         />
                         
-                        <div className="space-y-3">
-                          {!jobFile ? (
-                            <div className="border-2 border-dashed border-border rounded-lg p-6 text-center hover:border-primary/50 transition-colors">
-                              <Upload className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
-                              <h3 className="font-medium text-foreground mb-2">
-                                Select job file (Optional)
-                              </h3>
-                              <p className="text-sm text-muted-foreground mb-4">
-                                Select the job file to upload - optional
-                              </p>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                onClick={handleFileUploadClick}
-                                disabled={isUploading}
-                                className="mx-auto"
-                              >
-                                <Upload className="w-4 h-4 mr-2" />
-                                Select File
-                              </Button>
-                              <p className="text-xs text-muted-foreground mt-3">
-                                Maximum file size: 100MB
-                              </p>
-                            </div>
-                          ) : (
-                            <div className="border border-border rounded-lg p-4 bg-secondary/20">
-                              <div className="flex items-center justify-between mb-4">
-                                <div className="flex items-center gap-3">
-                                  <div className="w-10 h-10 rounded-md bg-primary/10 flex items-center justify-center">
-                                    <FileIcon className="w-5 h-5 text-primary" />
-                                  </div>
-                                  <div>
-                                    <p className="font-medium text-foreground">
-                                      {jobFile.name}
-                                    </p>
-                                    <p className="text-sm text-muted-foreground">
-                                      {formatFileSize(jobFile.size)}
-                                    </p>
+                        {!jobFile ? (
+                          <div className="border-2 border-dashed border-border rounded-lg p-6 text-center hover:border-primary/50 transition-colors">
+                            <Upload className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
+                            <h4 className="font-medium text-foreground mb-1">
+                              Upload Job File (Optional)
+                            </h4>
+                            <p className="text-sm text-muted-foreground mb-3">
+                              Upload files that workers need to complete the job
+                            </p>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={handleFileUploadClick}
+                              disabled={isUploading}
+                              className="mx-auto"
+                            >
+                              <Upload className="w-4 h-4 mr-2" />
+                              Select File
+                            </Button>
+                            <p className="text-xs text-muted-foreground mt-3">
+                              Maximum file size: 100MB
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="border border-border rounded-lg p-4 bg-secondary/20">
+                            <div className="flex items-center justify-between mb-3">
+                              <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-md bg-primary/10 flex items-center justify-center">
+                                  <FileIcon className="w-5 h-5 text-primary" />
+                                </div>
+                                <div>
+                                  <p className="font-medium text-foreground truncate max-w-[300px]">
+                                    {jobFile.name}
+                                  </p>
+                                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                                    <span>{formatFileSize(jobFile.size)}</span>
+                                    <span>•</span>
+                                    <span>{jobFile.type || 'Unknown type'}</span>
                                   </div>
                                 </div>
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={removeFile}
-                                  disabled={isUploading}
-                                  className="h-8 w-8 p-0"
-                                >
-                                  <X className="w-4 h-4" />
-                                </Button>
                               </div>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={removeFile}
+                                className="h-8 w-8 p-0"
+                                disabled={isUploading}
+                              >
+                                <X className="w-4 h-4" />
+                              </Button>
                             </div>
-                          )}
-                        </div>
+                            {(editingJob?.job_file_url || editingJob?.job_file_name) && !jobFile && (
+                              <div className="mt-2 p-2 rounded bg-blue-400/10 border border-blue-400/20">
+                                <p className="text-xs text-blue-400">
+                                  Current file: {editingJob.job_file_name || 'No file'}
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
                     
                     <div className="space-y-2">
-                      <Label>Payment Amount ($) *</Label>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        value={jobForm.payment_amount}
-                        onChange={(e) => setJobForm({ ...jobForm, payment_amount: e.target.value })}
-                        required
-                        disabled={isUploading}
-                        placeholder="0.00"
-                      />
-                    </div>
-                    
-                    <div className="space-y-2">
-                      <Label>Estimated Time</Label>
-                      <Input
-                        value={jobForm.estimated_time}
-                        onChange={(e) => setJobForm({ ...jobForm, estimated_time: e.target.value })}
-                        placeholder="e.g., 30 minutes"
-                        disabled={isUploading}
-                      />
+                      <Label>Payment Amount *</Label>
+                      <div className="relative">
+                        <DollarSign className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={jobForm.payment_amount}
+                          onChange={(e) => setJobForm({ ...jobForm, payment_amount: e.target.value })}
+                          className="pl-10"
+                          required
+                          disabled={isUploading}
+                          placeholder="0.00"
+                        />
+                      </div>
                     </div>
                     
                     <div className="space-y-2">
                       <Label>Difficulty *</Label>
-                      <Select 
-                        value={jobForm.difficulty} 
-                        onValueChange={(v) => setJobForm({ ...jobForm, difficulty: v })}
+                      <Select
+                        value={jobForm.difficulty}
+                        onValueChange={(value) => setJobForm({ ...jobForm, difficulty: value })}
                         disabled={isUploading}
                       >
                         <SelectTrigger>
@@ -821,15 +867,16 @@ const Admin = () => {
                     
                     <div className="space-y-2">
                       <Label>Required Tier *</Label>
-                      <Select 
-                        value={jobForm.required_tier} 
-                        onValueChange={(v) => setJobForm({ ...jobForm, required_tier: v })}
+                      <Select
+                        value={jobForm.required_tier}
+                        onValueChange={(value) => setJobForm({ ...jobForm, required_tier: value })}
                         disabled={isUploading}
                       >
                         <SelectTrigger>
                           <SelectValue placeholder="Select tier" />
                         </SelectTrigger>
                         <SelectContent>
+                          <SelectItem value="none">None</SelectItem>
                           <SelectItem value="regular">Regular</SelectItem>
                           <SelectItem value="pro">Pro</SelectItem>
                           <SelectItem value="vip">VIP</SelectItem>
@@ -837,20 +884,30 @@ const Admin = () => {
                       </Select>
                     </div>
                     
-                    <div className="col-span-2 space-y-2">
+                    <div className="space-y-2">
+                      <Label>Estimated Time</Label>
+                      <Input
+                        value={jobForm.estimated_time}
+                        onChange={(e) => setJobForm({ ...jobForm, estimated_time: e.target.value })}
+                        disabled={isUploading}
+                        placeholder="e.g., 30 minutes, 2 hours"
+                      />
+                    </div>
+                    
+                    <div className="space-y-2">
                       <Label>Category</Label>
-                      <Select 
-                        value={jobForm.category_id} 
-                        onValueChange={(v) => setJobForm({ ...jobForm, category_id: v })}
+                      <Select
+                        value={jobForm.category_id}
+                        onValueChange={(value) => setJobForm({ ...jobForm, category_id: value })}
                         disabled={isUploading}
                       >
                         <SelectTrigger>
                           <SelectValue placeholder="Select category" />
                         </SelectTrigger>
                         <SelectContent>
-                          {categories.map((cat) => (
-                            <SelectItem key={cat.id} value={cat.id}>
-                              {cat.name}
+                          {categories.map((category) => (
+                            <SelectItem key={category.id} value={category.id}>
+                              {category.name}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -858,21 +915,36 @@ const Admin = () => {
                     </div>
                   </div>
                   
-                  <Button 
-                    type="submit" 
-                    variant="hero" 
-                    className="w-full"
-                    disabled={isUploading}
-                  >
-                    {isUploading ? (
-                      <>
-                        <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-white mr-2"></div>
-                        Processing...
-                      </>
-                    ) : (
-                      editingJob ? 'Update Job' : 'Create Job'
-                    )}
-                  </Button>
+                  <div className="flex justify-end gap-3 pt-4 border-t">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => {
+                        setIsJobDialogOpen(false);
+                        setEditingJob(null);
+                        resetJobForm();
+                      }}
+                      disabled={isUploading}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      type="submit"
+                      variant="hero"
+                      disabled={isUploading}
+                    >
+                      {isUploading ? (
+                        <>
+                          <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-white mr-2"></div>
+                          {editingJob ? 'Updating...' : 'Creating...'}
+                        </>
+                      ) : (
+                        <>
+                          {editingJob ? 'Update Job' : 'Create Job'}
+                        </>
+                      )}
+                    </Button>
+                  </div>
                 </form>
               </DialogContent>
             </Dialog>
@@ -884,7 +956,7 @@ const Admin = () => {
           {stats.map((stat) => (
             <div key={stat.name} className="glass-card p-4">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center">
+                <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
                   <stat.icon className={`w-5 h-5 ${stat.color}`} />
                 </div>
                 <div>
@@ -897,423 +969,636 @@ const Admin = () => {
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-2 border-b border-border">
-          {['overview', 'jobs', 'submissions'].map((tab) => (
+        <div className="border-b border-border">
+          <div className="flex flex-wrap gap-4">
             <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`px-4 py-2 font-medium capitalize transition-colors ${
-                activeTab === tab
+              onClick={() => setActiveTab('overview')}
+              className={`px-4 py-2 font-medium transition-colors ${
+                activeTab === 'overview'
                   ? 'text-primary border-b-2 border-primary'
                   : 'text-muted-foreground hover:text-foreground'
               }`}
             >
-              {tab}
+              Overview
             </button>
-          ))}
+            <button
+              onClick={() => setActiveTab('jobs')}
+              className={`px-4 py-2 font-medium transition-colors ${
+                activeTab === 'jobs'
+                  ? 'text-primary border-b-2 border-primary'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Jobs ({jobs.length})
+            </button>
+            <button
+              onClick={() => setActiveTab('submissions')}
+              className={`px-4 py-2 font-medium transition-colors ${
+                activeTab === 'submissions'
+                  ? 'text-primary border-b-2 border-primary'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Submissions ({allSubmissions.length})
+            </button>
+            <button
+              onClick={() => setActiveTab('pending')}
+              className={`px-4 py-2 font-medium transition-colors relative ${
+                activeTab === 'pending'
+                  ? 'text-primary border-b-2 border-primary'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Pending Reviews
+              {pendingSubmissions.length > 0 && (
+                <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-400 text-white text-xs rounded-full flex items-center justify-center">
+                  {pendingSubmissions.length}
+                </span>
+              )}
+            </button>
+          </div>
         </div>
+
+        {/* Tab Content */}
+        {isLoading ? (
+          <div className="space-y-4">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="h-24 bg-secondary/50 rounded-xl animate-pulse" />
+            ))}
+          </div>
+        ) : (
+          <>
+            {activeTab === 'overview' && (
+              <div className="space-y-6">
+                {/* Pending Submissions Quick Access */}
+                <div className="glass-card p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-semibold text-foreground">
+                      Pending Submissions ({pendingSubmissions.length})
+                    </h3>
+                    {pendingSubmissions.length > 0 && (
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => setActiveTab('pending')}
+                      >
+                        Review All
+                      </Button>
+                    )}
+                  </div>
+                  {pendingSubmissions.length > 0 ? (
+                    <div className="space-y-3">
+                      {pendingSubmissions.slice(0, 5).map((sub) => (
+                        <div key={sub.id} className="p-3 rounded-lg bg-secondary/50 flex items-center justify-between">
+                          <div>
+                            <p className="font-medium text-foreground">{sub.job_title}</p>
+                            <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                              <span className="flex items-center gap-1">
+                                <User className="w-3 h-3" />
+                                {sub.user_name || sub.user_email}
+                              </span>
+                              <span>
+                                {new Date(sub.created_at).toLocaleDateString()}
+                              </span>
+                              <span>
+                                <DollarSign className="w-3 h-3 inline mr-1" />
+                                {sub.payment_amount}
+                              </span>
+                            </div>
+                          </div>
+                          <Button 
+                            variant="ghost" 
+                            size="sm"
+                            onClick={() => openReviewDialog(sub)}
+                          >
+                            Review
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <CheckCircle className="w-12 h-12 mx-auto mb-3" />
+                      <p>No pending submissions to review</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Recent Jobs */}
+                <div className="glass-card p-6">
+                  <h3 className="text-lg font-semibold text-foreground mb-4">Recent Jobs</h3>
+                  {jobs.length > 0 ? (
+                    <div className="space-y-3">
+                      {jobs.slice(0, 5).map((job) => (
+                        <div key={job.id} className="p-3 rounded-lg bg-secondary/50 flex items-center justify-between">
+                          <div>
+                            <p className="font-medium text-foreground">{job.title}</p>
+                            <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                              <span className={`px-2 py-0.5 rounded-full text-xs ${
+                                job.difficulty === 'easy' ? 'bg-green-400/10 text-green-400' :
+                                job.difficulty === 'medium' ? 'bg-yellow-400/10 text-yellow-400' :
+                                'bg-red-400/10 text-red-400'
+                              }`}>
+                                {job.difficulty}
+                              </span>
+                              <span className={`px-2 py-0.5 rounded-full text-xs bg-primary/10 text-primary`}>
+                                {job.required_tier}
+                              </span>
+                              <span>
+                                <DollarSign className="w-3 h-3 inline mr-1" />
+                                {job.payment_amount}
+                              </span>
+                              <span className={`px-2 py-0.5 rounded-full text-xs ${
+                                job.is_active ? 'bg-green-400/10 text-green-400' : 'bg-red-400/10 text-red-400'
+                              }`}>
+                                {job.is_active ? 'Active' : 'Inactive'}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => openEditDialog(job)}
+                              className="h-8 w-8 p-0"
+                              title="Edit"
+                            >
+                              <Edit className="w-4 h-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleToggleJobStatus(job)}
+                              className="h-8 w-8 p-0"
+                              title={job.is_active ? 'Deactivate' : 'Activate'}
+                            >
+                              {job.is_active ? <XCircle className="w-4 h-4" /> : <CheckCircle className="w-4 h-4" />}
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <Briefcase className="w-12 h-12 mx-auto mb-3" />
+                      <p>No jobs created yet</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'jobs' && (
+              <div className="glass-card p-6">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-6">
+                  <h3 className="text-lg font-semibold text-foreground">All Jobs ({jobs.length})</h3>
+                  <div className="flex items-center gap-3">
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                      <Input
+                        placeholder="Search jobs..."
+                        className="pl-10 w-48"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                      />
+                    </div>
+                    <Dialog open={isJobDialogOpen} onOpenChange={setIsJobDialogOpen}>
+                      <DialogTrigger asChild>
+                        <Button variant="hero" onClick={() => { setEditingJob(null); resetJobForm(); }}>
+                          <Plus className="w-4 h-4 mr-2" />
+                          Create Job
+                        </Button>
+                      </DialogTrigger>
+                    </Dialog>
+                  </div>
+                </div>
+                
+                {jobs.length > 0 ? (
+                  <div className="space-y-4">
+                    {jobs
+                      .filter(job => 
+                        job.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                        job.description.toLowerCase().includes(searchQuery.toLowerCase())
+                      )
+                      .map((job) => (
+                        <div key={job.id} className="p-4 rounded-lg bg-secondary/50 border border-border">
+                          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-3 mb-2">
+                                <h4 className="font-semibold text-foreground">{job.title}</h4>
+                                <span className={`px-2 py-0.5 rounded-full text-xs ${
+                                  job.is_active ? 'bg-green-400/10 text-green-400 border border-green-400/20' :
+                                  'bg-red-400/10 text-red-400 border border-red-400/20'
+                                }`}>
+                                  {job.is_active ? 'Active' : 'Inactive'}
+                                </span>
+                                <span className={`px-2 py-0.5 rounded-full text-xs ${
+                                  job.difficulty === 'easy' ? 'bg-green-400/10 text-green-400 border border-green-400/20' :
+                                  job.difficulty === 'medium' ? 'bg-yellow-400/10 text-yellow-400 border border-yellow-400/20' :
+                                  'bg-red-400/10 text-red-400 border border-red-400/20'
+                                }`}>
+                                  {job.difficulty}
+                                </span>
+                              </div>
+                              
+                              <p className="text-sm text-muted-foreground mb-3 line-clamp-2">
+                                {job.description}
+                              </p>
+                              
+                              <div className="flex flex-wrap items-center gap-3 text-sm">
+                                <span className="flex items-center gap-1 text-foreground">
+                                  <DollarSign className="w-3 h-3" />
+                                  {job.payment_amount}
+                                </span>
+                                <span className="px-2 py-0.5 rounded-full bg-primary/10 text-primary text-xs">
+                                  {job.required_tier.toUpperCase()}
+                                </span>
+                                <span className="text-muted-foreground">
+                                  Category: {job.category?.name || 'None'}
+                                </span>
+                                <span className="text-muted-foreground">
+                                  Submissions: {job.current_submissions || 0}
+                                </span>
+                                {job.job_file_url && (
+                                  <span className="px-2 py-0.5 rounded-full bg-blue-400/10 text-blue-400 text-xs flex items-center gap-1">
+                                    <FileIcon className="w-3 h-3" />
+                                    File Attached
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            
+                            <div className="flex items-center gap-2">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => openEditDialog(job)}
+                                className="flex items-center gap-1"
+                              >
+                                <Edit className="w-4 h-4" />
+                                Edit
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleToggleJobStatus(job)}
+                                className="flex items-center gap-1"
+                              >
+                                {job.is_active ? (
+                                  <>
+                                    <XCircle className="w-4 h-4" />
+                                    Deactivate
+                                  </>
+                                ) : (
+                                  <>
+                                    <CheckCircle className="w-4 h-4" />
+                                    Activate
+                                  </>
+                                )}
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleDeleteJob(job.id)}
+                                className="text-red-400 hover:text-red-400 hover:bg-red-400/10"
+                              >
+                                <Trash className="w-4 h-4" />
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-12 text-muted-foreground">
+                    <Briefcase className="w-16 h-16 mx-auto mb-4" />
+                    <h4 className="text-lg font-medium text-foreground mb-2">No Jobs Yet</h4>
+                    <p className="mb-4">Create your first job to get started</p>
+                    <Button variant="hero" onClick={() => setIsJobDialogOpen(true)}>
+                      <Plus className="w-4 h-4 mr-2" />
+                      Create Job
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {activeTab === 'submissions' && (
+              <div className="glass-card p-6">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-6">
+                  <h3 className="text-lg font-semibold text-foreground">All Submissions ({allSubmissions.length})</h3>
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                      <Input
+                        placeholder="Search by job, user, or content..."
+                        className="pl-10 w-48"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                      />
+                    </div>
+                    <Select value={statusFilter} onValueChange={(value: 'all' | 'pending' | 'approved' | 'rejected') => setStatusFilter(value)}>
+                      <SelectTrigger className="w-40">
+                        <SelectValue placeholder="Filter status" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Status</SelectItem>
+                        <SelectItem value="pending">Pending</SelectItem>
+                        <SelectItem value="approved">Approved</SelectItem>
+                        <SelectItem value="rejected">Rejected</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                
+                {filteredSubmissions.length > 0 ? (
+                  <div className="space-y-4">
+                    {filteredSubmissions.map((submission) => {
+                      const fileUrl = getFileUrl(submission);
+                      const fileName = getFileName(submission);
+                      
+                      return (
+                        <div key={submission.id} className="p-4 rounded-lg bg-secondary/50 border border-border">
+                          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-3 mb-2">
+                                <h4 className="font-semibold text-foreground">{submission.job_title}</h4>
+                                <span className={`px-2 py-0.5 rounded-full text-xs border ${getStatusColor(submission.status)}`}>
+                                  {submission.status.toUpperCase()}
+                                </span>
+                              </div>
+                              
+                              <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground mb-3">
+                                <span className="flex items-center gap-1">
+                                  <User className="w-3 h-3" />
+                                  {submission.user_name || 'Anonymous'} ({submission.user_email})
+                                </span>
+                                <span>•</span>
+                                <span>
+                                  Submitted: {new Date(submission.created_at).toLocaleDateString()}
+                                </span>
+                                {submission.reviewed_at && (
+                                  <>
+                                    <span>•</span>
+                                    <span>
+                                      Reviewed: {new Date(submission.reviewed_at).toLocaleDateString()}
+                                    </span>
+                                  </>
+                                )}
+                              </div>
+                              
+                              {submission.submission_content && (
+                                <div className="mb-3 p-3 rounded bg-secondary/70">
+                                  <p className="text-sm text-foreground">
+                                    <span className="font-medium">Submission: </span>
+                                    {submission.submission_content}
+                                  </p>
+                                </div>
+                              )}
+                              
+                              {submission.admin_feedback && (
+                                <div className="mb-3 p-3 rounded bg-blue-400/10 border border-blue-400/20">
+                                  <p className="text-sm text-blue-400">
+                                    <span className="font-medium">Admin Feedback: </span>
+                                    {submission.admin_feedback}
+                                  </p>
+                                </div>
+                              )}
+                              
+                              <div className="flex items-center gap-3">
+                                <span className="flex items-center gap-1 text-foreground">
+                                  <DollarSign className="w-4 h-4" />
+                                  {submission.payment_amount}
+                                </span>
+                                
+                                {fileUrl && (
+                                  <div className="flex items-center gap-2">
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => handleDownloadSubmissionFile(submission)}
+                                      className="flex items-center gap-1"
+                                    >
+                                      <Download className="w-4 h-4" />
+                                      Download File
+                                    </Button>
+                                    <span className="text-xs text-muted-foreground">
+                                      {fileName}
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                            
+                            <div className="flex items-center gap-2">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => openReviewDialog(submission)}
+                                className="flex items-center gap-1"
+                              >
+                                {submission.status === 'pending' ? 'Review' : 'Update Review'}
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="text-center py-12 text-muted-foreground">
+                    <FileText className="w-16 h-16 mx-auto mb-4" />
+                    <h4 className="text-lg font-medium text-foreground mb-2">No Submissions Found</h4>
+                    <p>{searchQuery || statusFilter !== 'all' ? 'Try adjusting your search or filter' : 'No submissions have been made yet'}</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {activeTab === 'pending' && (
+              <div className="glass-card p-6">
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="text-lg font-semibold text-foreground">
+                    Pending Review ({pendingSubmissions.length})
+                  </h3>
+                  {pendingSubmissions.length > 0 && (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Filter className="w-4 h-4" />
+                      <span>Sorted by oldest first</span>
+                    </div>
+                  )}
+                </div>
+                
+                {pendingSubmissions.length > 0 ? (
+                  <div className="space-y-4">
+                    {pendingSubmissions.map((submission) => {
+                      const fileUrl = getFileUrl(submission);
+                      const fileName = getFileName(submission);
+                      
+                      return (
+                        <div key={submission.id} className="p-4 rounded-lg bg-yellow-400/5 border border-yellow-400/20">
+                          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-3 mb-2">
+                                <Clock className="w-5 h-5 text-yellow-400" />
+                                <h4 className="font-semibold text-foreground">{submission.job_title}</h4>
+                              </div>
+                              
+                              <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground mb-3">
+                                <span className="flex items-center gap-1">
+                                  <User className="w-3 h-3" />
+                                  {submission.user_name || 'Anonymous'} ({submission.user_email})
+                                </span>
+                                <span>•</span>
+                                <span>
+                                  Submitted: {new Date(submission.created_at).toLocaleDateString()}
+                                </span>
+                                <span>•</span>
+                                <span className="flex items-center gap-1 text-yellow-400">
+                                  <Clock className="w-3 h-3" />
+                                  Pending for {Math.floor((Date.now() - new Date(submission.created_at).getTime()) / (1000 * 60 * 60 * 24))} days
+                                </span>
+                              </div>
+                              
+                              {submission.submission_content && (
+                                <div className="mb-3 p-3 rounded bg-secondary/70">
+                                  <p className="text-sm text-foreground">
+                                    <span className="font-medium">Submission: </span>
+                                    {submission.submission_content}
+                                  </p>
+                                </div>
+                              )}
+                              
+                              <div className="flex items-center gap-3">
+                                <span className="flex items-center gap-1 text-foreground">
+                                  <DollarSign className="w-4 h-4" />
+                                  {submission.payment_amount}
+                                </span>
+                                
+                                {fileUrl && (
+                                  <div className="flex items-center gap-2">
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => handleDownloadSubmissionFile(submission)}
+                                      className="flex items-center gap-1"
+                                    >
+                                      <Download className="w-4 h-4" />
+                                      View File
+                                    </Button>
+                                    <span className="text-xs text-muted-foreground">
+                                      {fileName}
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                            
+                            <div className="flex flex-col sm:flex-row gap-2">
+                              <Button
+                                variant="default"
+                                size="sm"
+                                onClick={() => openReviewDialog(submission)}
+                                className="flex items-center gap-1 bg-green-400 hover:bg-green-500 text-white"
+                              >
+                                <CheckCircle className="w-4 h-4" />
+                                Approve
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => openReviewDialog(submission)}
+                                className="flex items-center gap-1 text-red-400 border-red-400 hover:bg-red-400/10"
+                              >
+                                <XCircle className="w-4 h-4" />
+                                Reject
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="text-center py-12 text-muted-foreground">
+                    <CheckCircle className="w-16 h-16 mx-auto mb-4 text-green-400" />
+                    <h4 className="text-lg font-medium text-foreground mb-2">All Caught Up!</h4>
+                    <p>No pending submissions to review</p>
+                  </div>
+                )}
+              </div>
+            )}
+          </>
+        )}
 
         {/* Review Submission Dialog */}
         <Dialog open={reviewDialogOpen} onOpenChange={setReviewDialogOpen}>
-          <DialogContent className="max-w-2xl">
+          <DialogContent className="max-w-md">
             <DialogHeader>
               <DialogTitle>Review Submission</DialogTitle>
             </DialogHeader>
+            
             {selectedSubmission && (
               <div className="space-y-4">
+                <div>
+                  <h4 className="font-medium text-foreground mb-1">{selectedSubmission.job_title}</h4>
+                  <p className="text-sm text-muted-foreground">
+                    Submitted by: {selectedSubmission.user_name || 'Anonymous'} ({selectedSubmission.user_email})
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    Amount: ${selectedSubmission.payment_amount}
+                  </p>
+                </div>
+                
+                {selectedSubmission.submission_content && (
+                  <div className="p-3 rounded bg-secondary/50">
+                    <p className="text-sm text-foreground">{selectedSubmission.submission_content}</p>
+                  </div>
+                )}
+                
                 <div className="space-y-2">
-                  <Label>Feedback (Optional)</Label>
+                  <Label htmlFor="feedback">Feedback (Optional)</Label>
                   <Textarea
-                    placeholder="Provide feedback for the worker..."
+                    id="feedback"
+                    placeholder="Provide feedback for the submission..."
                     value={feedback}
                     onChange={(e) => setFeedback(e.target.value)}
                     rows={4}
-                    disabled={isReviewing}
                   />
                 </div>
                 
-                <div className="flex justify-end gap-2">
+                <div className="flex justify-end gap-3 pt-4 border-t">
                   <Button
+                    type="button"
                     variant="outline"
                     onClick={() => setReviewDialogOpen(false)}
                     disabled={isReviewing}
                   >
                     Cancel
                   </Button>
-                  <Button
-                    variant="destructive"
-                    onClick={() => handleReviewSubmission('rejected')}
-                    disabled={isReviewing}
-                  >
-                    <XCircle className="w-4 h-4 mr-2" />
-                    Reject
-                  </Button>
-                  <Button
-                    variant="hero"
-                    onClick={() => handleReviewSubmission('approved')}
-                    disabled={isReviewing}
-                  >
-                    <CheckCircle className="w-4 h-4 mr-2" />
-                    Approve & Pay ${selectedSubmission.payment_amount}
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      onClick={() => handleReviewSubmission('rejected')}
+                      disabled={isReviewing}
+                    >
+                      {isReviewing ? 'Processing...' : 'Reject'}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="hero"
+                      onClick={() => handleReviewSubmission('approved')}
+                      disabled={isReviewing}
+                    >
+                      {isReviewing ? 'Processing...' : 'Approve & Pay'}
+                    </Button>
+                  </div>
                 </div>
               </div>
             )}
           </DialogContent>
         </Dialog>
-
-        {/* Content */}
-        {activeTab === 'jobs' && (
-          <div className="space-y-4">
-            {isLoading && jobs.length === 0 ? (
-              <div className="space-y-3">
-                {[...Array(3)].map((_, i) => (
-                  <div key={i} className="glass-card p-4">
-                    <div className="h-6 w-3/4 bg-gray-200 rounded animate-pulse mb-2"></div>
-                    <div className="h-4 w-1/2 bg-gray-200 rounded animate-pulse"></div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <>
-                {jobs.map((job) => (
-                  <div key={job.id} className="glass-card p-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3">
-                          <h3 className="font-semibold text-foreground">{job.title}</h3>
-                          <span className={`text-xs px-2 py-0.5 rounded-full ${
-                            job.is_active 
-                              ? 'bg-green-400/10 text-green-400' 
-                              : 'bg-red-400/10 text-red-400'
-                          }`}>
-                            {job.is_active ? 'Active' : 'Inactive'}
-                          </span>
-                          {job.job_file_url && (
-                            <span className="text-xs px-2 py-0.5 rounded-full bg-blue-400/10 text-blue-400 flex items-center gap-1">
-                              <FileIcon className="w-3 h-3" />
-                              Has File
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-4 mt-1 text-sm text-muted-foreground">
-                          <span>{job.category?.name || 'General'}</span>
-                          <span>${job.payment_amount}</span>
-                          <span>{job.required_tier.toUpperCase()}</span>
-                          <span>{job.current_submissions} submissions</span>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Button 
-                          variant="ghost" 
-                          size="sm" 
-                          onClick={() => handleToggleJobStatus(job)}
-                          title={job.is_active ? 'Deactivate job' : 'Activate job'}
-                        >
-                          {job.is_active ? 
-                            <XCircle className="w-4 h-4" /> : 
-                            <CheckCircle className="w-4 h-4" />
-                          }
-                        </Button>
-                        <Button 
-                          variant="ghost" 
-                          size="sm" 
-                          onClick={() => openEditDialog(job)}
-                          title="Edit job"
-                        >
-                          <Edit className="w-4 h-4" />
-                        </Button>
-                        <Button 
-                          variant="ghost" 
-                          size="sm" 
-                          onClick={() => handleDeleteJob(job.id)}
-                          title="Delete job"
-                        >
-                          <Trash className="w-4 h-4 text-destructive" />
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </>
-            )}
-          </div>
-        )}
-
-        {activeTab === 'submissions' && (
-          <div className="space-y-6">
-            {/* Search and Filter Bar */}
-            <div className="glass-card p-4 space-y-4">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-                <Input
-                  placeholder="Search submissions by job title, worker name, or email..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10"
-                />
-              </div>
-              
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  variant={statusFilter === 'all' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setStatusFilter('all')}
-                  className="flex items-center gap-2"
-                >
-                  <Filter className="w-3 h-3" />
-                  All ({allSubmissions.length})
-                </Button>
-                <Button
-                  variant={statusFilter === 'pending' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setStatusFilter('pending')}
-                  className="flex items-center gap-2"
-                >
-                  <Clock className="w-3 h-3" />
-                  Pending ({pendingSubmissions.length})
-                </Button>
-                <Button
-                  variant={statusFilter === 'approved' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setStatusFilter('approved')}
-                  className="flex items-center gap-2"
-                >
-                  <CheckCircle className="w-3 h-3" />
-                  Approved ({allSubmissions.filter(s => s.status === 'approved').length})
-                </Button>
-                <Button
-                  variant={statusFilter === 'rejected' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setStatusFilter('rejected')}
-                  className="flex items-center gap-2"
-                >
-                  <XCircle className="w-3 h-3" />
-                  Rejected ({allSubmissions.filter(s => s.status === 'rejected').length})
-                </Button>
-              </div>
-            </div>
-
-            {isLoading && allSubmissions.length === 0 ? (
-              <div className="space-y-4">
-                {[...Array(3)].map((_, i) => (
-                  <div key={i} className="glass-card p-6">
-                    <div className="h-6 w-3/4 bg-gray-200 rounded animate-pulse mb-4"></div>
-                    <div className="h-4 w-1/2 bg-gray-200 rounded animate-pulse"></div>
-                  </div>
-                ))}
-              </div>
-            ) : filteredSubmissions.length > 0 ? (
-              <div className="space-y-4">
-                {filteredSubmissions.map((submission) => {
-                  const fileUrl = getFileUrl(submission);
-                  const fileName = getFileName(submission);
-                  
-                  return (
-                    <div key={submission.id} className="glass-card p-6">
-                      <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 mb-6 pb-4 border-b border-border">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-3 mb-3">
-                            <h3 className="text-lg font-semibold text-foreground">
-                              {submission.job_title || 'Unknown Job'}
-                            </h3>
-                            <span className={`text-xs px-2.5 py-1 rounded-full border ${getStatusColor(submission.status)}`}>
-                              {submission.status.toUpperCase()}
-                            </span>
-                            <span className="text-xs text-muted-foreground">
-                              ID: {submission.id.substring(0, 8)}...
-                            </span>
-                          </div>
-                          
-                          <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
-                            <div className="flex items-center gap-2">
-                              <User className="w-4 h-4" />
-                              <span className="font-medium text-foreground">
-                                {submission.user_name || 'No name provided'}
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <Mail className="w-4 h-4" />
-                              <span className="font-medium text-foreground">
-                                {submission.user_email}
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <DollarSign className="w-4 h-4" />
-                              <span className="font-medium text-foreground">
-                                ${submission.payment_amount}
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <Clock className="w-4 h-4" />
-                              <span className="font-medium text-foreground">
-                                {new Date(submission.created_at).toLocaleDateString()}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                        
-                        {submission.status === 'pending' ? (
-                          <Button
-                            variant="outline"
-                            onClick={() => openReviewDialog(submission)}
-                          >
-                            <CheckCircle className="w-4 h-4 mr-1" />
-                            Review
-                          </Button>
-                        ) : (
-                          <div className={`text-xs px-2.5 py-1 rounded-full border ${getStatusColor(submission.status)}`}>
-                            {submission.status.toUpperCase()}
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="space-y-4">
-                        {fileUrl && (
-                          <div className="space-y-2">
-                            <h4 className="font-medium text-foreground flex items-center gap-2">
-                              <FileIcon className="w-4 h-4" />
-                              Submitted File
-                            </h4>
-                            <div className="p-4 bg-secondary/30 rounded-lg">
-                              <div className="flex items-center justify-between">
-                                <div>
-                                  <p className="font-medium text-foreground">
-                                    {fileName}
-                                  </p>
-                                  <a 
-                                    href={fileUrl} 
-                                    target="_blank" 
-                                    rel="noopener noreferrer"
-                                    className="text-primary hover:underline text-sm flex items-center gap-1"
-                                  >
-                                    <ExternalLink className="w-3 h-3" />
-                                    View File
-                                  </a>
-                                </div>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => window.open(fileUrl, '_blank')}
-                                  className="flex items-center gap-1"
-                                >
-                                  <Download className="w-4 h-4" />
-                                  Download
-                                </Button>
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                        
-                        <div className="space-y-2">
-                          <h4 className="font-medium text-foreground">Submission Notes</h4>
-                          <div className="p-4 bg-secondary/30 rounded-lg whitespace-pre-wrap text-sm">
-                            {submission.submission_content || 'No additional notes provided.'}
-                          </div>
-                        </div>
-                        
-                        {submission.admin_feedback && (
-                          <div className="space-y-2">
-                            <h4 className="font-medium text-foreground">Admin Feedback</h4>
-                            <div className="p-4 bg-blue-400/10 rounded-lg whitespace-pre-wrap text-sm border border-blue-400/20">
-                              {submission.admin_feedback}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="glass-card p-12 text-center">
-                <FileText className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
-                <h3 className="text-xl font-semibold text-foreground mb-2">
-                  {searchQuery ? 'No matching submissions' : 'No submissions found'}
-                </h3>
-                <p className="text-muted-foreground mb-4">
-                  {searchQuery 
-                    ? 'Try adjusting your search query or filters' 
-                    : 'There are no submissions matching the current filter'}
-                </p>
-                <div className="flex flex-col gap-2 items-center">
-                  <p className="text-sm text-muted-foreground">
-                    Data Source: <span className="font-medium">{dataSource}</span>
-                  </p>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setDataSource(dataSource === 'view' ? 'table' : 'view')}
-                    className="flex items-center gap-2"
-                  >
-                    <Database className="w-4 h-4" />
-                    Switch to {dataSource === 'view' ? 'Table' : 'View'}
-                  </Button>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {activeTab === 'overview' && (
-          <div className="grid lg:grid-cols-2 gap-6">
-            <div className="glass-card p-6">
-              <h2 className="text-lg font-semibold text-foreground mb-4">Recent Jobs</h2>
-              <div className="space-y-3">
-                {jobs.slice(0, 5).map((job) => (
-                  <div key={job.id} className="flex items-center justify-between py-2 border-b border-border last:border-0">
-                    <div>
-                      <p className="font-medium text-foreground">{job.title}</p>
-                      <p className="text-sm text-muted-foreground">{job.category?.name}</p>
-                    </div>
-                    <span className={`text-xs px-2 py-0.5 rounded-full ${
-                      job.is_active ? 'bg-green-400/10 text-green-400' : 'bg-red-400/10 text-red-400'
-                    }`}>
-                      {job.is_active ? 'Active' : 'Inactive'}
-                    </span>
-                  </div>
-                ))}
-                {jobs.length === 0 && (
-                  <p className="text-muted-foreground text-center py-4">No jobs yet</p>
-                )}
-              </div>
-            </div>
-            
-            <div className="glass-card p-6">
-              <h2 className="text-lg font-semibold text-foreground mb-4">Recent Submissions</h2>
-              <div className="space-y-3">
-                {allSubmissions.slice(0, 5).map((sub) => (
-                  <div key={sub.id} className="flex items-center justify-between py-2 border-b border-border last:border-0">
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium text-foreground truncate">{sub.job_title}</p>
-                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                        <span className="truncate">
-                          {sub.user_name || sub.user_email}
-                        </span>
-                        <span className={`text-xs px-2 py-0.5 rounded-full ${getStatusColor(sub.status)}`}>
-                          {sub.status}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs px-2 py-0.5 rounded-full bg-blue-400/10 text-blue-400">
-                        ${sub.payment_amount}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-                {allSubmissions.length === 0 && (
-                  <div className="text-center py-4">
-                    <p className="text-muted-foreground">No submissions yet</p>
-                    <p className="text-sm text-muted-foreground mt-1">
-                      Data Source: <span className="font-medium">{dataSource}</span>
-                    </p>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     </DashboardLayout>
   );

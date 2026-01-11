@@ -5,35 +5,29 @@ import {
   Facebook, 
   Instagram,
   Mail,
-  MapPin,
-  Phone
+  MapPin
 } from "lucide-react";
 
 const Footer = () => {
   const footerLinks = {
     platform: [
       { name: "How It Works", href: "#how-it-works" },
-      { name: "Browse Jobs", href: "categories" },
+      { name: "Browse Jobs", href: "/jobs" },
       { name: "Pricing", href: "/pricing" },
       { name: "Success Stories", href: "#testimonials" },
     ],
     freelancers: [
-      { name: "Create Account", href: "/register" },
+      { name: "Create Account", href: "/auth" },
       { name: "Freelancer Dashboard", href: "/dashboard" },
-      { name: "Skills Assessment", href: "/skills" },
-      { name: "Help Center", href: "/help" },
+      // Removed Skills Assessment and Help Center as requested
     ],
     company: [
-      { name: "About Us", href: "/about" },
-      { name: "Careers", href: "/careers" },
-      { name: "Blog", href: "/blog" },
-      { name: "Contact", href: "/contact" },
+      // Removed all company links as requested
     ],
     legal: [
-      { name: "Privacy Policy", href: "/privacy" },
-      { name: "Terms of Service", href: "/terms" },
-      { name: "Cookie Policy", href: "/cookies" },
-      { name: "GDPR", href: "/gdpr" },
+      { name: "Privacy Policy", href: "/privacy-policy" },
+      { name: "Terms of Service", href: "/terms-of-service" },
+      // Removed Cookie Policy and GDPR as requested
     ],
   };
 
@@ -44,11 +38,36 @@ const Footer = () => {
     { icon: Instagram, href: "#", label: "Instagram" },
   ];
 
+  // Function to determine if link should be anchor or router link
+  const renderLink = (link: { name: string, href: string }) => {
+    if (link.href.startsWith('#')) {
+      // Anchor link for on-page navigation
+      return (
+        <a
+          href={link.href}
+          className="text-muted-foreground hover:text-primary transition-colors text-sm"
+        >
+          {link.name}
+        </a>
+      );
+    } else {
+      // Internal route - use Link component
+      return (
+        <Link
+          to={link.href}
+          className="text-muted-foreground hover:text-primary transition-colors text-sm"
+        >
+          {link.name}
+        </Link>
+      );
+    }
+  };
+
   return (
     <footer className="bg-secondary/30 border-t border-border">
       <div className="container mx-auto px-4 sm:px-6 lg:px-8">
         {/* Main Footer */}
-        <div className="py-16 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-8 lg:gap-12">
+        <div className="py-16 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-8 lg:gap-12">
           {/* Brand Column */}
           <div className="col-span-2 md:col-span-3 lg:col-span-2">
             <Link to="/" className="flex items-center gap-2 mb-6">
@@ -74,66 +93,37 @@ const Footer = () => {
             </div>
           </div>
 
-          {/* Links Columns */}
+          {/* Platform Links Column */}
           <div>
             <h4 className="font-semibold text-foreground mb-4">Platform</h4>
             <ul className="space-y-3">
               {footerLinks.platform.map((link) => (
                 <li key={link.name}>
-                  <a
-                    href={link.href}
-                    className="text-muted-foreground hover:text-primary transition-colors text-sm"
-                  >
-                    {link.name}
-                  </a>
+                  {renderLink(link)}
                 </li>
               ))}
             </ul>
           </div>
 
+          {/* Freelancers Links Column */}
           <div>
             <h4 className="font-semibold text-foreground mb-4">Freelancers</h4>
             <ul className="space-y-3">
               {footerLinks.freelancers.map((link) => (
                 <li key={link.name}>
-                  <a
-                    href={link.href}
-                    className="text-muted-foreground hover:text-primary transition-colors text-sm"
-                  >
-                    {link.name}
-                  </a>
+                  {renderLink(link)}
                 </li>
               ))}
             </ul>
           </div>
 
-          <div>
-            <h4 className="font-semibold text-foreground mb-4">Company</h4>
-            <ul className="space-y-3">
-              {footerLinks.company.map((link) => (
-                <li key={link.name}>
-                  <a
-                    href={link.href}
-                    className="text-muted-foreground hover:text-primary transition-colors text-sm"
-                  >
-                    {link.name}
-                  </a>
-                </li>
-              ))}
-            </ul>
-          </div>
-
+          {/* Legal Links Column */}
           <div>
             <h4 className="font-semibold text-foreground mb-4">Legal</h4>
             <ul className="space-y-3">
               {footerLinks.legal.map((link) => (
                 <li key={link.name}>
-                  <a
-                    href={link.href}
-                    className="text-muted-foreground hover:text-primary transition-colors text-sm"
-                  >
-                    {link.name}
-                  </a>
+                  {renderLink(link)}
                 </li>
               ))}
             </ul>
@@ -151,6 +141,8 @@ const Footer = () => {
               <a
                 key={social.label}
                 href={social.href}
+                target="_blank"
+                rel="noopener noreferrer"
                 className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
                 aria-label={social.label}
               >

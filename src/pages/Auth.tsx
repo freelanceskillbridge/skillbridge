@@ -410,6 +410,7 @@ const Auth = () => {
                   )}
                 </div>
 
+                // Replace the checkbox section with this:
                 <div className="space-y-3">
                   <div className="flex items-start space-x-2">
                     <Checkbox
@@ -427,55 +428,25 @@ const Auth = () => {
                         className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
                       >
                         I agree to the{' '}
-                        <Dialog open={showTermsDialog} onOpenChange={setShowTermsDialog}>
-                          <DialogTrigger asChild>
-                            <button 
-                              type="button" 
-                              className="text-primary hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
-                              onClick={(e) => {
-                                e.preventDefault();
-                                setShowTermsDialog(true);
-                              }}
-                              disabled={isSubmitting}
-                            >
-                              Terms of Service
-                            </button>
-                          </DialogTrigger>
-                          <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
-                            <DialogHeader>
-                              <DialogTitle>Terms of Service</DialogTitle>
-                            </DialogHeader>
-                            <div className="space-y-4 text-sm">
-                              {/* Terms content - same as before */}
-                              <p>Terms content here...</p>
-                            </div>
-                          </DialogContent>
-                        </Dialog>{' '}
+                        <Link 
+                          to="/terms-of-service" 
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-primary hover:underline"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          Terms of Service
+                        </Link>{' '}
                         and{' '}
-                        <Dialog open={showPrivacyDialog} onOpenChange={setShowPrivacyDialog}>
-                          <DialogTrigger asChild>
-                            <button 
-                              type="button" 
-                              className="text-primary hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
-                              onClick={(e) => {
-                                e.preventDefault();
-                                setShowPrivacyDialog(true);
-                              }}
-                              disabled={isSubmitting}
-                            >
-                              Privacy Policy
-                            </button>
-                          </DialogTrigger>
-                          <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
-                            <DialogHeader>
-                              <DialogTitle>Privacy Policy</DialogTitle>
-                            </DialogHeader>
-                            <div className="space-y-4 text-sm">
-                              {/* Privacy content - same as before */}
-                              <p>Privacy content here...</p>
-                            </div>
-                          </DialogContent>
-                        </Dialog>
+                        <Link 
+                          to="/privacy-policy"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-primary hover:underline"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          Privacy Policy
+                        </Link>
                       </label>
                       <p className="text-xs text-muted-foreground">
                         You must agree to our Terms of Service and Privacy Policy to create an account.

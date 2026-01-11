@@ -23,7 +23,7 @@ import {
   Download,
   FolderX,
 } from 'lucide-react';
-import { uploadToCloudinary, formatFileSize } from '@/utils/cloudinary';
+import { uploadToCloudinary, formatFileSize, checkCloudinaryConfig, downloadFile } from '@/utils/cloudinary';
 
 interface Job {
   id: string;
@@ -68,6 +68,20 @@ const JobDetail = () => {
       navigate('/auth');
     }
   }, [user, authLoading, navigate]);
+
+  useEffect(() => {
+    // Check Cloudinary config on load
+    const config = checkCloudinaryConfig();
+    if (config.isDemo) {
+      console.warn(config.message);
+      toast({
+        title: 'Cloudinary Demo Mode',
+        description: 'File uploads use temporary storage. For permanent storage, configure Cloudinary.',
+        variant: 'default',
+        duration: 5000,
+      });
+    }
+  }, []);
 
   useEffect(() => {
     const fetchJob = async () => {
@@ -174,7 +188,8 @@ const JobDetail = () => {
     setUploadedFile(null);
   };
 
-  // Handle job file download
+  // Handle job file download - DIRECT DOWNLOAD
+  // Handle job file download - FIXED VERSION
   const handleDownloadJobFile = async () => {
     if (!job?.job_file_url) {
       toast({
@@ -186,21 +201,13 @@ const JobDetail = () => {
     }
 
     try {
-      // For Cloudinary URLs, open in new tab
-      if (job.job_file_url.includes('cloudinary.com')) {
-        window.open(job.job_file_url, '_blank');
-      } else {
-        // For other URLs, try to download
-        const response = await fetch(job.job_file_url);
-        const blob = await response.blob();
-        const downloadUrl = window.URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = downloadUrl;
-        link.download = job.job_file_name || 'job_file';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        window.URL.revokeObjectURL(downloadUrl);
+      const success = await downloadFile(
+        job.job_file_url, 
+        job.job_file_name || 'job_file'
+      );
+      
+      if (!success) {
+        throw new Error('Download failed');
       }
       
     } catch (error) {
@@ -241,10 +248,12 @@ const JobDetail = () => {
       if (uploadedFile) {
         try {
           setIsUploading(true);
+          console.log('Starting file upload...');
           fileUrl = await uploadToCloudinary(uploadedFile);
           fileName = uploadedFile.name;
           fileType = uploadedFile.type;
           fileSize = uploadedFile.size;
+          console.log('File upload completed:', { fileUrl, fileName });
           setIsUploading(false);
         } catch (uploadError: any) {
           console.error('File upload failed:', uploadError);
@@ -270,19 +279,32 @@ const JobDetail = () => {
 
       // Store file information if uploaded
       if (fileUrl) {
-        submissionData.file_url = fileUrl;
-        submissionData.worker_file_url = fileUrl; // Store in both for compatibility
+        // Store in multiple columns for compatibility
+        submissionData.submission_url = fileUrl;  // For backward compatibility
+        submissionData.file_url = fileUrl;        // New column
+        submissionData.worker_file_url = fileUrl; // New column
         submissionData.file_name = fileName;
         submissionData.worker_file_name = fileName;
         if (fileType) submissionData.file_type = fileType;
         if (fileSize) submissionData.file_size = fileSize;
+        
+        console.log('Storing file data:', {
+          submission_url: fileUrl,
+          file_url: fileUrl,
+          worker_file_url: fileUrl,
+          file_name: fileName
+        });
       }
 
+      console.log('Submitting data to database:', submissionData);
       const { error: submissionError } = await supabase
         .from('job_submissions')
         .insert([submissionData]);
 
-      if (submissionError) throw submissionError;
+      if (submissionError) {
+        console.error('Database submission error:', submissionError);
+        throw submissionError;
+      }
 
       // Update daily tasks used
       if (profile) {

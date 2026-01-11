@@ -16,6 +16,8 @@ import Settings from "./pages/Settings";
 import Pricing from "./pages/Pricing";
 import Checkout from "./pages/Checkout";
 import Admin from "./pages/Admin";
+import TermsOfService from "./pages/TermsOfService"; // ADD THIS
+import PrivacyPolicy from "./pages/PrivacyPolicy";   // ADD THIS
 import NotFound from "./pages/NotFound";
 
 // Configure QueryClient with better defaults
@@ -40,7 +42,7 @@ const App = () => (
           <Routes>
             <Route path="/" element={<Index />} />
             <Route path="/auth" element={<Auth />} />
-            <Route path="/auth/callback" element={<AuthCallback />} /> {/* ADDED THIS LINE */}
+            <Route path="/auth/callback" element={<AuthCallback />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/jobs" element={<Jobs />} />
             <Route path="/jobs/:id" element={<JobDetail />} />
@@ -50,6 +52,10 @@ const App = () => (
             <Route path="/pricing" element={<Pricing />} />
             <Route path="/checkout" element={<Checkout />} />
             <Route path="/admin" element={<Admin />} />
+            
+            {/* ADD THESE NEW ROUTES */}
+            <Route path="/terms-of-service" element={<TermsOfService />} />
+            <Route path="/privacy-policy" element={<PrivacyPolicy />} />
 
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />

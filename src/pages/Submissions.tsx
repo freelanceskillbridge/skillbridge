@@ -17,17 +17,18 @@ import {
   XCircle,
   DollarSign,
   FileText,
-  ExternalLink,
   Briefcase,
   Download,
   AlertCircle,
   RefreshCw,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { downloadFile } from '@/utils/cloudinary';
 
 interface Submission {
   id: string;
   submission_content: string;
+  submission_url: string | null;
   file_url: string | null;
   worker_file_url: string | null;
   file_name: string | null;
@@ -71,6 +72,7 @@ const Submissions = () => {
         .select(`
           id,
           submission_content,
+          submission_url,
           file_url,
           worker_file_url,
           file_name,
@@ -185,9 +187,9 @@ const Submissions = () => {
     }
   };
 
-  // Get the actual file URL (check both file_url and worker_file_url)
+  // Get the actual file URL (check multiple columns for compatibility)
   const getFileUrl = (submission: Submission): string | null => {
-    return submission.file_url || submission.worker_file_url;
+    return submission.submission_url || submission.file_url || submission.worker_file_url;
   };
 
   // Get the actual file name
@@ -221,32 +223,25 @@ const Submissions = () => {
     }
 
     try {
-      // For Cloudinary URLs, we can download directly
-      if (fileUrl.includes('cloudinary.com')) {
-        window.open(fileUrl, '_blank');
-      } else {
-        // For other URLs, try to download
-        const response = await fetch(fileUrl);
-        const blob = await response.blob();
-        const downloadUrl = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = downloadUrl;
-        a.download = fileName || 'submission_file';
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(downloadUrl);
-        document.body.removeChild(a);
-      }
+      const success = await downloadFile(fileUrl, fileName || 'submission_file');
       
-      toast({
-        title: 'Download started',
-        description: 'Your file download has started',
-      });
+      if (success) {
+        toast({
+          title: 'Download started',
+          description: 'Your file download has started',
+        });
+      } else {
+        toast({
+          title: 'Download failed',
+          description: 'Failed to download the file',
+          variant: 'destructive',
+        });
+      }
     } catch (error) {
       console.error('Download error:', error);
       toast({
         title: 'Download failed',
-        description: 'Could not download the file. Try opening it directly.',
+        description: 'Failed to download the file',
         variant: 'destructive',
       });
     }
@@ -434,22 +429,12 @@ const Submissions = () => {
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => window.open(fileUrl, '_blank')}
-                            className="flex items-center gap-1"
-                            title="View file"
-                          >
-                            <ExternalLink className="w-4 h-4" />
-                            View
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
                             onClick={() => handleDownloadFile(submission)}
                             className="flex items-center gap-1"
                             title="Download file"
                           >
                             <Download className="w-4 h-4" />
-                            Download
+                            Download File
                           </Button>
                         </div>
                       )}

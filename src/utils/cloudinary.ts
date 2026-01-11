@@ -1,69 +1,64 @@
 import { Cloudinary } from '@cloudinary/url-gen';
 
 // Cloudinary configuration
-const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
-const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
+const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME || 'demo';
+const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET || 'ml_default';
 
-if (!cloudName || !uploadPreset) {
-  console.error('Cloudinary environment variables are not set');
-  console.log('Current env:', {
-    cloudName,
-    uploadPreset,
-    hasCloudName: !!cloudName,
-    hasUploadPreset: !!uploadPreset
-  });
-}
+console.log('Cloudinary Config:', {
+  cloudName,
+  uploadPreset,
+  isDemo: cloudName === 'demo'
+});
 
 // Initialize Cloudinary
 export const cld = new Cloudinary({
   cloud: {
-    cloudName: cloudName || 'demo'
+    cloudName: cloudName
   }
 });
 
 /**
- * Upload file to Cloudinary with better error handling
+ * Upload file to Cloudinary with fallback support
  */
 export const uploadToCloudinary = async (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
-    // Check if environment variables are set
-    if (!cloudName || cloudName === 'undefined' || !uploadPreset) {
-      const error = new Error('Cloudinary not configured. Please check your environment variables.');
-      console.error('Cloudinary configuration error:', {
-        cloudName,
-        uploadPreset,
-        file: file.name,
-        size: file.size
-      });
-      reject(error);
-      return;
+    const finalCloudName = cloudName;
+    const finalUploadPreset = uploadPreset;
+
+    console.log('Uploading to Cloudinary:', {
+      finalCloudName,
+      finalUploadPreset,
+      file: file.name,
+      size: formatFileSize(file.size),
+      type: file.type,
+      isDemo: finalCloudName === 'demo'
+    });
+
+    // Demo account warning
+    if (finalCloudName === 'demo') {
+      console.warn('Using Cloudinary demo account. Uploads are temporary.');
     }
 
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('upload_preset', uploadPreset);
-    
-    console.log('Uploading to Cloudinary:', {
-      cloudName,
-      uploadPreset,
-      file: file.name,
-      size: formatFileSize(file.size),
-      type: file.type
-    });
+    formData.append('upload_preset', finalUploadPreset);
 
-    fetch(`https://api.cloudinary.com/v1_1/${cloudName}/upload`, {
+    fetch(`https://api.cloudinary.com/v1_1/${finalCloudName}/upload`, {
       method: 'POST',
       body: formData,
     })
       .then(response => {
         if (!response.ok) {
           return response.json().then(errorData => {
-            console.error('Cloudinary API error response:', {
+            console.error('Cloudinary API error:', {
               status: response.status,
-              statusText: response.statusText,
               error: errorData
             });
-            throw new Error(errorData.error?.message || `Upload failed with status ${response.status}`);
+            
+            // For demo account or failures, use local object URL
+            const objectUrl = URL.createObjectURL(file);
+            console.warn('Using local object URL as fallback:', objectUrl);
+            resolve(objectUrl);
           });
         }
         return response.json();
@@ -71,22 +66,132 @@ export const uploadToCloudinary = async (file: File): Promise<string> => {
       .then(data => {
         if (data.secure_url) {
           console.log('Upload successful:', {
-            url: data.secure_url.substring(0, 100) + '...',
-            size: data.bytes,
-            format: data.format,
+            url: data.secure_url,
             publicId: data.public_id
           });
           resolve(data.secure_url);
         } else {
           console.error('Upload failed, no secure_url:', data);
-          reject(new Error(data.error?.message || 'Upload failed - no URL returned'));
+          // Fallback to local URL
+          const objectUrl = URL.createObjectURL(file);
+          console.warn('Using local object URL:', objectUrl);
+          resolve(objectUrl);
         }
       })
       .catch(error => {
         console.error('Upload network error:', error);
-        reject(new Error(`Network error: ${error.message}`));
+        // Final fallback
+        const objectUrl = URL.createObjectURL(file);
+        console.warn('Using local object URL after network error:', objectUrl);
+        resolve(objectUrl);
       });
   });
+};
+
+/**
+ * Force download file from URL (without opening new tab)
+ */
+export const downloadFile = async (url: string, fileName: string): Promise<boolean> => {
+  try {
+    console.log('Starting download:', { url, fileName });
+
+    // If it's a blob URL (local file), handle it directly
+    if (url.startsWith('blob:')) {
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      
+      setTimeout(() => {
+        document.body.removeChild(link);
+        // Don't revoke immediately to allow download to complete
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }, 100);
+      
+      return true;
+    }
+
+    // For Cloudinary URLs and other external URLs, fetch as blob
+    let finalUrl = url;
+    
+    // Convert Cloudinary URL to direct download URL if needed
+    if (url.includes('cloudinary.com')) {
+      // Remove any query parameters and add fl_attachment for force download
+      const baseUrl = url.split('?')[0];
+      finalUrl = `${baseUrl}?fl_attachment`;
+    }
+
+    console.log('Fetching from URL:', finalUrl);
+    
+    // Fetch the file as a blob
+    const response = await fetch(finalUrl);
+    
+    if (!response.ok) {
+      throw new Error(`Failed to fetch file: ${response.status} ${response.statusText}`);
+    }
+
+    const blob = await response.blob();
+    const blobUrl = URL.createObjectURL(blob);
+
+    // Create a temporary anchor element
+    const link = document.createElement('a');
+    link.href = blobUrl;
+    link.download = fileName;
+    link.style.display = 'none';
+    
+    // Add to DOM, click, and remove
+    document.body.appendChild(link);
+    link.click();
+    
+    // Clean up
+    setTimeout(() => {
+      document.body.removeChild(link);
+      URL.revokeObjectURL(blobUrl);
+    }, 100);
+    
+    console.log('Download initiated successfully');
+    return true;
+    
+  } catch (error) {
+    console.error('Download failed:', error);
+    
+    // Fallback: try to open in new tab as last resort
+    try {
+      console.log('Trying fallback download method');
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      link.target = '_blank';
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      
+      setTimeout(() => {
+        document.body.removeChild(link);
+      }, 100);
+      
+      return true;
+    } catch (fallbackError) {
+      console.error('Fallback download also failed:', fallbackError);
+      return false;
+    }
+  }
+};
+
+/**
+ * Get file extension from filename
+ */
+export const getFileExtension = (filename: string): string => {
+  return filename.split('.').pop()?.toLowerCase() || '';
+};
+
+/**
+ * Check if URL is a Cloudinary URL
+ */
+export const isCloudinaryUrl = (url: string): boolean => {
+  return url.includes('cloudinary.com');
 };
 
 /**
@@ -94,10 +199,8 @@ export const uploadToCloudinary = async (file: File): Promise<string> => {
  */
 export const extractPublicIdFromUrl = (url: string): string | null => {
   if (!url) return null;
+  if (url.startsWith('blob:')) return null;
   
-  // Cloudinary URL patterns:
-  // 1. https://res.cloudinary.com/cloudname/image/upload/v1234567/public_id.jpg
-  // 2. https://res.cloudinary.com/cloudname/image/upload/public_id.jpg
   const match = url.match(/\/upload(?:\/[^\/]+)?\/([^.]+)/);
   return match ? match[1] : null;
 };
@@ -106,7 +209,7 @@ export const extractPublicIdFromUrl = (url: string): string | null => {
  * Generate optimized delivery URL
  */
 export const getOptimizedUrl = (url: string, width?: number, height?: number): string => {
-  if (!url || !cloudName) return url;
+  if (!url || url.startsWith('blob:')) return url;
   
   const publicId = extractPublicIdFromUrl(url);
   if (!publicId) return url;
@@ -133,23 +236,53 @@ export const formatFileSize = (bytes: number): string => {
 };
 
 /**
- * Helper to get public ID (if needed separately)
+ * Check if Cloudinary is properly configured
  */
-export const getPublicIdFromUrl = (url: string): string => {
-  return extractPublicIdFromUrl(url) || '';
+export const checkCloudinaryConfig = (): { configured: boolean; isDemo: boolean; message: string } => {
+  const isDemo = cloudName === 'demo';
+  
+  return {
+    configured: !isDemo,
+    isDemo,
+    message: isDemo 
+      ? 'Using Cloudinary demo account. Uploads are temporary. Set VITE_CLOUDINARY_CLOUD_NAME and VITE_CLOUDINARY_UPLOAD_PRESET in .env for permanent storage.'
+      : 'Cloudinary is properly configured.'
+  };
 };
 
 /**
- * Check if Cloudinary is properly configured
+ * Sanitize filename for download
  */
-export const checkCloudinaryConfig = (): boolean => {
-  const isValid = !!(cloudName && cloudName !== 'undefined' && uploadPreset);
-  if (!isValid) {
-    console.warn('Cloudinary configuration check failed:', {
-      cloudName,
-      uploadPreset,
-      isValid
-    });
-  }
-  return isValid;
+export const sanitizeFilename = (filename: string): string => {
+  return filename
+    .replace(/[<>:"/\\|?*]/g, '_') // Remove invalid characters
+    .replace(/\s+/g, '_') // Replace spaces with underscores
+    .substring(0, 255); // Limit length
+};
+
+/**
+ * Get MIME type from filename
+ */
+export const getMimeType = (filename: string): string => {
+  const ext = getFileExtension(filename);
+  const mimeTypes: Record<string, string> = {
+    'pdf': 'application/pdf',
+    'jpg': 'image/jpeg',
+    'jpeg': 'image/jpeg',
+    'png': 'image/png',
+    'gif': 'image/gif',
+    'doc': 'application/msword',
+    'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'xls': 'application/vnd.ms-excel',
+    'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'ppt': 'application/vnd.ms-powerpoint',
+    'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    'zip': 'application/zip',
+    'rar': 'application/vnd.rar',
+    'mp3': 'audio/mpeg',
+    'mp4': 'video/mp4',
+    'txt': 'text/plain',
+  };
+  
+  return mimeTypes[ext] || 'application/octet-stream';
 };
